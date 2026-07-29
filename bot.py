@@ -1,4 +1,5 @@
 import sqlite3
+import os
 import random
 import time
 import asyncio
@@ -895,4 +896,4 @@ async def resetdb(interaction: discord.Interaction):
   init_db()
   await interaction.response.send_message("☢️ База очищена!", ephemeral=True)
 
-bot.run("MTUzMDkyMjgxODkzNzk3MDcyOQ.GLjRjm.LmMWbJA8Dq7BkJIcbotnKjNaxa-4lo9BqgZ-tM")
+bot.run(os.getenv("TOKEN"))
