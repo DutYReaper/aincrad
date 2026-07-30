@@ -336,21 +336,27 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
     await asyncio.sleep(3.0)
 
     success = random.choice([True, False]) # 50/50 честный шанс
-    
-    # Ссылка на гифку для итогового сообщения
-    gif_url = "https://i.pinimg.com/originals/58/23/81/582381e4e65d4f6a027116695445d649.gif"
     embed_res = discord.Embed(title="[ 🕵️ ИТОГ ОГРАБЛЕНИЯ ]")
-    embed_res.set_image(url=gif_url) # Гифка появляется только здесь, в финале!
 
     if success:
+        # Гифка при успешном ограблении
+        success_gif = "https://i.pinimg.com/originals/58/23/81/582381e4e65d4f6a027116695445d649.gif"
+        embed_res.set_image(url=success_gif)
+        
         users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": potential_amount}})
         users_collection.update_one({"_id": member.id}, {"$inc": {"coins": -potential_amount}})
         await add_xp(interaction, attacker.id, 20)
+        
         embed_res.description = f"🎉 Успех! Вы незаметно вытащили **{potential_amount:,}** Колов у {member.mention}!"
         embed_res.color = 0x2ECC71
     else:
+        # Твоя новая гифка с Казумой при проигрыше / поимке стражей
+        fail_gif = "https://media1.tenor.com/m/LjXd-V-BrwIAAAAd/kazuma-run-kazuma-scared.gif"
+        embed_res.set_image(url=fail_gif)
+        
         users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": -potential_amount}})
-        embed_res.description = f"🚨 Вас поймали за руку! Вы выплачиваете штраф **{potential_amount:,}** Колов."
+        
+        embed_res.description = f"🚨 Вас поймали за руку! Вы с криками убегаете и выплачиваете штраф **{potential_amount:,}** Колов."
         embed_res.color = 0xE74C3C
 
     await interaction.edit_original_response(embed=embed_res)
