@@ -845,9 +845,109 @@ class BuyAuctionSelect(discord.ui.View):
 
         await interaction.response.edit_message(content=f"🎉 Вы успешно приобрели уникальную роль **{role_name}** за **{price:,}** Колов!", embed=None, view=None)
 
-@bot.tree.command(name="auction", description="Глобальный аукцион кастомных ролей")
+# --- АКТИВНЫЙ АУКЦИОН РОЛЕЙ С ПАГИНАЦИЕЙ ---
+
+class SellRoleModal(discord.ui.Modal, title="Выставить роль на аукцион"):
+    price_input = discord.ui.TextInput(label="Цена в Колах", placeholder="5000", max_length=10)
+
+    def __init__(self, role_id: int, role_name: str):
+        super().__init__()
+        self.role_id = role_id
+        self.role_name = role_name
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            price = int(self.price_input.value)
+        except ValueError:
+            return await interaction.response.send_message("❌ Неверный формат цены!", ephemeral=True)
+
+        if price <= 0: return await interaction.response.send_message("❌ Цена должна быть больше 0!", ephemeral=True)
+
+        last_item = auction_collection.find_one(sort=[("sale_id", -1)])
+        next_sale_id = (last_item["sale_id"] + 1) if last_item and "sale_id" in last_item else 1
+
+        auction_collection.insert_one({
+            "sale_id": next_sale_id,
+            "role_id": self.role_id,
+            "seller_id": interaction.user.id,
+            "price": price,
+            "role_name": self.role_name
+        })
+
+        role = interaction.guild.get_role(self.role_id)
+        if role: 
+            try: await interaction.user.remove_roles(role)
+            except: pass
+        await interaction.response.send_message(f"✅ Роль **{self.role_name}** успешно выставлена на аукцион за **{price:,}** Колов!", ephemeral=True)
+
+class SellRoleSelect(discord.ui.View):
+    def __init__(self, roles_list):
+        super().__init__(timeout=30)
+        options = [discord.SelectOption(label=r.name, value=str(r.id)) for r in roles_list]
+        self.select = discord.ui.Select(placeholder="Выберите роль для продажи...", options=options)
+        self.select.callback = self.select_callback
+        self.add_item(self.select)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        role_id = int(self.select.values[0])
+        role = interaction.guild.get_role(role_id)
+        if not role: return await interaction.response.send_message("❌ Роль не найдена.", ephemeral=True)
+        await interaction.response.send_modal(SellRoleModal(role_id, role.name))
+
+class AuctionPagingView(discord.ui.View):
+    def __init__(self, items):
+        super().__init__(timeout=60)
+        self.items = items
+        self.page = 0
+        self.per_page = 5  # Количество лотов на одной странице
+        self.update_buttons()
+
+    def update_buttons(self):
+        max_pages = (len(self.items) - 1) // self.per_page
+        self.prev_button.disabled = self.page == 0
+        self.next_button.disabled = self.page >= max_pages
+
+    def get_current_embed(self):
+        embed = discord.Embed(
+            title="[ 🏛️ ГЛОБАЛЬНЫЙ АУКЦИОН РОЛЕЙ ]", 
+            description="Здесь игроки выставляют на продажу свои уникальные кастомные роли.", 
+            color=0xFFD700
+        )
+        
+        start = self.page * self.per_page
+        end = start + self.per_page
+        current_slice = self.items[start:end]
+        
+        max_pages = max(1, (len(self.items) + self.per_page - 1) // self.per_page)
+
+        for idx, item in enumerate(current_slice, start=start + 1):
+            embed.add_field(
+                name=f"📦 Лот #{idx}: {item['role_name']}",
+                value=f"• **Цена:** `{item['price']:,}` Колов\n• **Продавец:** <@{item['seller_id']}>\n• **Команда для покупки:** `/buyitem {item['sale_id']}` (или выберите в меню)",
+                inline=False
+            )
+            
+        embed.set_footer(text=f"Страница {self.page + 1} из {max_pages} • Aincrad Trading System")
+        return embed
+
+    @discord.ui.button(label="Назад", style=discord.ButtonStyle.grey, emoji="⬅️")
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page > 0:
+            self.page -= 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.get_current_embed(), view=self)
+
+    @discord.ui.button(label="Вперед", style=discord.ButtonStyle.grey, emoji="➡️")
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        max_pages = (len(self.items) - 1) // self.per_page
+        if self.page < max_pages:
+            self.page += 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.get_current_embed(), view=self)
+
+@bot.tree.command(name="auction", description="Глобальный аукцион кастомных ролей с листанием")
 @app_commands.choices(action=[
-    app_commands.Choice(name="Купить роль", value="list"),
+    app_commands.Choice(name="Посмотреть лоты", value="list"),
     app_commands.Choice(name="Продать роль", value="sell")
 ])
 async def auction(interaction: discord.Interaction, action: str):
@@ -857,13 +957,8 @@ async def auction(interaction: discord.Interaction, action: str):
         if not items: 
             return await interaction.response.send_message("📦 На текущий момент торговая площадка пуста.", ephemeral=True)
         
-        embed = discord.Embed(
-            title="[ 🏛️ ГЛОБАЛЬНЫЙ АУКЦИОН РОЛЕЙ ]", 
-            description="Здесь игроки выставляют на продажу свои уникальные кастомные роли.\nВыберите интересующий лот в меню ниже:", 
-            color=0xFFD700
-        )
-        embed.set_footer(text="Aincrad Trading System")
-        await interaction.response.send_message(embed=embed, view=BuyAuctionSelect(items), ephemeral=True)
+        view = AuctionPagingView(items)
+        await interaction.response.send_message(embed=view.get_current_embed(), view=view, ephemeral=True)
         
     elif action == "sell":
         rows = list(custom_roles_collection.find({"user_id": uid}))
@@ -889,7 +984,7 @@ async def leaderboard(interaction: discord.Interaction):
   embed.set_footer(text="Рейтинг сильнейших игроков башни")
   await interaction.response.send_message(embed=embed)
 
-# --- АДМИНСКИЕ КОМАНДЫ ---
+# --- ВСЕ АДМИНСКИЕ КОМАНДЫ И ЧИТЫ (ПОЛНЫЙ КОМПЛЕКТ) ---
 
 @bot.tree.command(name="setlevel", description="[АДМИН] Установить этаж игроку")
 @app_commands.default_permissions(administrator=True)
@@ -899,16 +994,69 @@ async def setlevel(interaction: discord.Interaction, member: discord.Member, lev
   await check_level_roles(member, level)
   await interaction.response.send_message(f"✅ Установлен {level} этаж для {member.mention}.", ephemeral=True)
 
+@bot.tree.command(name="setxp", description="[АДМИН] Установить точное количество опыта (XP)")
+@app_commands.default_permissions(administrator=True)
+async def setxp(interaction: discord.Interaction, member: discord.Member, xp: int):
+  get_or_create_user(member.id)
+  users_collection.update_one({"_id": member.id}, {"$set": {"xp": xp}})
+  await interaction.response.send_message(f"✅ Установлено `{xp:,} XP` для пользователя {member.mention}.", ephemeral=True)
+
+@bot.tree.command(name="givexp", description="[АДМИН] Выдать опыт (XP) игроку")
+@app_commands.default_permissions(administrator=True)
+async def givexp(interaction: discord.Interaction, member: discord.Member, amount: int):
+  get_or_create_user(member.id)
+  await add_xp(interaction, member.id, amount)
+  await interaction.response.send_message(f"✅ Выдано `{amount:,} XP` пользователю {member.mention}.", ephemeral=True)
+
+@bot.tree.command(name="setcoins", description="[АДМИН] Установить точный баланс Колов")
+@app_commands.default_permissions(administrator=True)
+async def setcoins(interaction: discord.Interaction, member: discord.Member, amount: int):
+  get_or_create_user(member.id)
+  users_collection.update_one({"_id": member.id}, {"$set": {"coins": amount}})
+  await interaction.response.send_message(f"✅ Баланс {member.mention} изменен на ровно `{amount:,}` Колов.", ephemeral=True)
+
 @bot.tree.command(name="givecoins", description="[АДМИН] Выдать Колы игроку")
 @app_commands.default_permissions(administrator=True)
 async def givecoins(interaction: discord.Interaction, member: discord.Member, amount: int):
   get_or_create_user(member.id)
   users_collection.update_one({"_id": member.id}, {"$inc": {"coins": amount}})
-  await interaction.response.send_message(f"✅ Выдано {amount:,} Колов пользователю {member.mention}.", ephemeral=True)
+  await interaction.response.send_message(f"✅ Выдано `{amount:,}` Колов пользователю {member.mention}.", ephemeral=True)
 
-@bot.tree.command(name="resetdb", description="[АДМИН] Полная очистка базы данных")
+@bot.tree.command(name="takecoins", description="[АДМИН] Забрать Колы у игрока")
 @app_commands.default_permissions(administrator=True)
-async def resetdb(interaction: discord.Interaction):
+async def takecoins(interaction: discord.Interaction, member: discord.Member, amount: int):
+  get_or_create_user(member.id)
+  users_collection.update_one({"_id": member.id}, {"$inc": {"coins": -amount}})
+  await interaction.response.send_message(f"🔻 Списано `{amount:,}` Колов у пользователя {member.mention}.", ephemeral=True)
+
+@bot.tree.command(name="setstreak", description="[АДМИН] Установить текущий стрик входов")
+@app_commands.default_permissions(administrator=True)
+async def setstreak(interaction: discord.Interaction, member: discord.Member, days: int):
+  get_or_create_user(member.id)
+  users_collection.update_one({"_id": member.id}, {"$set": {"streak": days}})
+  await interaction.response.send_message(f"✅ Установлен стрик в `{days} дн.` для {member.mention}.", ephemeral=True)
+
+@bot.tree.command(name="resetcd", description="[АДМИН] Сбросить все кулдауны (daily, work, crime, rob) игроку")
+@app_commands.default_permissions(administrator=True)
+async def resetcd(interaction: discord.Interaction, member: discord.Member = None):
+  target = member or interaction.user
+  get_or_create_user(target.id)
+  users_collection.update_one(
+      {"_id": target.id}, 
+      {"$set": {"last_daily": 0.0, "last_work": 0.0, "last_crime": 0.0, "last_rob": 0.0}}
+  )
+  await interaction.response.send_message(f"⚡ Все кулдауны для {target.mention} успешно сброшены!", ephemeral=True)
+
+@bot.tree.command(name="resetuser", description="[АДМИН] Полностью сбросить профиль конкретного игрока")
+@app_commands.default_permissions(administrator=True)
+async def resetuser(interaction: discord.Interaction, member: discord.Member):
+  users_collection.delete_one({"_id": member.id})
+  get_or_create_user(member.id)
+  await interaction.response.send_message(f"☢️ Профиль игрока {member.mention} полностью сброшен к заводским настройкам!", ephemeral=True)
+
+@bot.tree.command(name="resetdb", description="[АДМИН] Полная глобальная очистка базы данных")
+@app_commands.default_permissions(administrator=True)
+async def resetdb(interaction: discord.Interaction):        
   users_collection.delete_many({})
   guilds_collection.delete_many({})
   custom_roles_collection.delete_many({})
