@@ -388,7 +388,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
 
   users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
-  gif_url = "https://media1.tenor.com/m/9PALsSO_XpsAAAAC/misaka-mikoto.gif"
+  gif_url = "https://media1.tenor.com/m/JlDkKFwn8AoAAAAC/toss-coin-flip.gif"
   embed_loading = discord.Embed(title="[ 🪙 ОРЕЛ И РЕШКА ]", description="Монетка подброшена в воздух...", color=0xF1C40F)
   embed_loading.set_image(url=gif_url)
   await interaction.response.send_message(embed=embed_loading)
