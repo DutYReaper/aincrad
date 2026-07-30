@@ -320,14 +320,17 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
 
     target_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(member.id)
     
-    # Проверка на слишком бедного/слабого игрока (если у него меньше 500 колов)
     if target_coins < 500:
         return await interaction.response.send_message(f"❌ У игрока {member.mention} слишком мало средств (меньше 500 Колов). Его грабить бессмысленно!", ephemeral=True)
+
+    # ЗАЩИТА СЛАБЫХ: Если твой баланс больше баланса жертвы в 5 раз и у тебя больше 50 000 Колов — грабить нельзя!
+    if att_coins > 50000 and att_coins > target_coins * 5:
+        return await interaction.response.send_message(f"❌ У тебя слишком много денег ({att_coins:,} Колов). Тебе стыдно грабить бедняка с балансом {target_coins:,} Колов! Ищи соперника побогаче.", ephemeral=True)
 
     # Рассчитываем сумму кражи (от 5% до 10% от баланса жертвы)
     potential_amount = random.randint(int(target_coins * 0.05), int(target_coins * 0.10))
     if potential_amount < 20:
-        potential_amount = 20 # Минимальный порог штрафа/куша
+        potential_amount = 20
 
     if att_coins < potential_amount:
         return await interaction.response.send_message(f"❌ На вашем балансе должно быть минимум **{potential_amount:,}** Колов для покрытия возможного штрафа!", ephemeral=True)
@@ -343,7 +346,6 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
     embed_res = discord.Embed(title="[ 🕵️ ИТОГ ОГРАБЛЕНИЯ ]")
 
     if success:
-        # Прямая ссылка на гифку успеха
         success_gif = "https://i.pinimg.com/originals/58/23/81/582381e4e65d4f6a027116695445d649.gif"
         embed_res.set_image(url=success_gif)
         
@@ -354,7 +356,6 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
         embed_res.description = f"🎉 Успех! Вы незаметно вытащили **{potential_amount:,}** Колов у {member.mention}!"
         embed_res.color = 0x2ECC71
     else:
-        # Исправленная прямая ссылка на гифку с Казумой при проигрыше
         fail_gif = "https://media.tenor.com/LjXd-V-BrwIAAAAd/kazuma-run-kazuma-scared.gif"
         embed_res.set_image(url=fail_gif)
         
