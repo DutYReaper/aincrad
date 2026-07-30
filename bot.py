@@ -300,7 +300,7 @@ async def crime(interaction: discord.Interaction):
       embed.description = f"Вас поймали! Штраф: **{fine}** Колов <:col:1530575386457542817>."
   await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="rob", description="Попытаться ограбить другого игрока")
+@bot.tree.command(name="rob", description="Попытаться ограбить другого игрока (Сбалансировано)")
 async def rob(interaction: discord.Interaction, member: discord.Member):
     attacker = interaction.user
     if member.id == attacker.id:
@@ -320,27 +320,38 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
 
     target_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(member.id)
     if target_coins < 200:
-        return await interaction.response.send_message(f"❌ У игрока недостаточно средств для грабежа.", ephemeral=True)
+        return await interaction.response.send_message(f"❌ У игрока слишком мало средств для грабежа.", ephemeral=True)
+
+    # Рассчитываем сумму (от 5% до 10% от баланса жертвы)
+    potential_amount = random.randint(int(target_coins * 0.05), int(target_coins * 0.10))
+
+    if att_coins < potential_amount:
+        return await interaction.response.send_message(f"❌ На вашем балансе должно быть минимум **{potential_amount:,}** Колов для покрытия возможного штрафа!", ephemeral=True)
 
     users_collection.update_one({"_id": attacker.id}, {"$set": {"last_rob": current_time}})
 
-    if random.randint(1, 100) <= 40:
-        stolen = int(target_coins * random.uniform(0.10, 0.20))
-        users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": stolen}})
-        users_collection.update_one({"_id": member.id}, {"$inc": {"coins": -stolen}})
+    gif_url = "https://i.pinimg.com/originals/58/23/81/582381e4e65d4f6a027116695445d649.gif"
+    embed_loading = discord.Embed(title="[ 🕵️ ОГРАБЛЕНИЕ ]", description=f"Вы тихо подкрадываетесь к {member.mention}...", color=0x2C3E50)
+    embed_loading.set_image(url=gif_url)
+    await interaction.response.send_message(embed=embed_loading)
+    await asyncio.sleep(3.0)
+
+    success = random.choice([True, False]) # 50/50 честный шанс
+    embed_res = discord.Embed(title="[ 🕵️ ИТОГ ОГРАБЛЕНИЯ ]")
+    embed_res.set_image(url=gif_url) # Гифка остается
+
+    if success:
+        users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": potential_amount}})
+        users_collection.update_one({"_id": member.id}, {"$inc": {"coins": -potential_amount}})
         await add_xp(interaction, attacker.id, 20)
-        embed = discord.Embed(title="[ 🥷 УСПЕШНОЕ ОГРАБЛЕНИЕ ]", color=0x2ECC71)
-        embed.description = f"💥 Вы вытащили **{stolen}** Колов у {member.mention}!"
-        embed.set_image(url="https://i.pinimg.com/originals/58/23/81/582381e4e65d4f6a027116695445d649.gif")
-        await interaction.response.send_message(embed=embed)
+        embed_res.description = f"🎉 Успех! Вы незаметно вытащили **{potential_amount:,}** Колов у {member.mention}!"
+        embed_res.color = 0x2ECC71
     else:
-        fine = random.randint(40, 90)
-        new_att_coins = max(0, att_coins - fine)
-        users_collection.update_one({"_id": attacker.id}, {"$set": {"coins": new_att_coins}})
-        embed = discord.Embed(title="[ ❌ ПРОВАЛ ОГРАБЛЕНИЯ ]", color=0xE74C3C)
-        embed.description = f"🚨 Стража поймала вас! Штраф: **{fine}** Колов."
-        embed.set_image(url="https://i.pinimg.com/originals/1d/85/80/1d8580859a663c8c58d2aa9ff9dc87c8.gif")
-        await interaction.response.send_message(embed=embed)
+        users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": -potential_amount}})
+        embed_res.description = f"🚨 Вас поймали за руку! Вы выплачиваете штраф **{potential_amount:,}** Колов."
+        embed_res.color = 0xE74C3C
+
+    await interaction.edit_original_response(embed=embed_res)
 
 # --- АЗАРТНЫЕ ИГРЫ ---
 
@@ -361,14 +372,14 @@ async def dice(interaction: discord.Interaction, amount: int):
 
   p_roll, b_roll = random.randint(1, 6), random.randint(1, 6)
   embed_res = discord.Embed(title="[ 🎲 КОСТИ АЙНКРАДА ]", color=0x9B59B6)
-  embed_res.set_image(url="https://i.pinimg.com/originals/80/9f/ba/809fba531ccbb8e24010696ffa1503e2.gif")
+  # Гифка удалена из итогов
 
   if p_roll > b_roll:
       users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
-      embed_res.description = f"🎉 **Победа!** Вы выбросили `🎲 {p_roll}`, бот — `🤖 {b_roll}`.\nВыиграно: **{amount}** Колов!"
+      embed_res.description = f"🎉 **Победа!** Вы выбросили `🎲 {p_roll}`, бот — `🤖 {b_roll}`.\nВыиграно: **{amount:,}** Колов!"
       embed_res.color = 0x2ECC71
   elif p_roll < b_roll:
-      embed_res.description = f"💀 **Поражение.** Вы выбросили `🎲 {p_roll}`, бот — `🤖 {b_roll}`.\nПотеряно: **{amount}** Колов."
+      embed_res.description = f"💀 **Поражение.** Вы выбросили `🎲 {p_roll}`, бот — `🤖 {b_roll}`.\nПотеряно: **{amount:,}** Колов."
       embed_res.color = 0xE74C3C
   else:
       users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount}})
@@ -397,7 +408,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
 
   result = random.choice(["орел", "решка"])
   embed_res = discord.Embed(title="[ 🪙 ИТОГ ПОДБРОСА ]", color=0x2ECC71)
-  # Строчка с set_image для итогового результата удалена отсюда!
+  # Гифка удалена из итогов
   
   if choice == result:
       users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
@@ -426,7 +437,8 @@ async def roulette(interaction: discord.Interaction, amount: int):
 
   shot = random.choice([True, False, False, False, False, False])
   embed_res = discord.Embed(title="[ 🎯 РУССКАЯ РУЛЕТКА ]", color=0xE74C3C)
-  embed_res.set_image(url="https://i.pinimg.com/originals/ac/56/c5/ac56c5c7e6037a698e22c9a30a8dccda.gif")
+  # Гифка удалена из итогов
+  
   if not shot:
       users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
       embed_res.description = f"💥 *ЩЕЛК!* Барабан пуст. Вам повезло, вы выиграли **{amount:,}** Колов!"
@@ -586,13 +598,13 @@ class CustomTitleModal(discord.ui.Modal, title="Покупка кастомно�
         titles_collection.insert_one({"user_id": interaction.user.id, "title_name": t_text})
         await interaction.response.send_message(f"👑 Поздравляем! Вы приобрели кастомный титул **{t_text}**!", ephemeral=True)
 
-# --- ИНТЕРАКТИВНОЕ МЕНЮ МАГАЗИНА (/shop) ---
+# --- ИНТЕРАКТИВНОЕ МЕНЮ МАГАЗИНА (/shop) — ОБНОВЛЕННЫЙ ДИЗАЙН ---
 
 class ShopButtonsView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
 
-    @discord.ui.button(label="Неприкасаемый (15k)", style=discord.ButtonStyle.blurple, emoji="🛡️")
+    @discord.ui.button(label="Неприкасаемый", style=discord.ButtonStyle.blurple, emoji="🛡️")
     async def buy_untouchable(self, interaction: discord.Interaction, button: discord.ui.Button):
         role = discord.utils.get(interaction.guild.roles, name="Неприкасаемый")
         if role and role in interaction.user.roles:
@@ -600,38 +612,55 @@ class ShopButtonsView(discord.ui.View):
         
         price = 15000
         coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
-        if coins < price: return await interaction.response.send_message("❌ Нужно 15 000 Колов!", ephemeral=True)
+        if coins < price: return await interaction.response.send_message("❌ Нужно **15,000** Колов!", ephemeral=True)
         
         users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -price}})
         if role: await interaction.user.add_roles(role)
         await interaction.response.send_message(f"🎉 Вы успешно приобрели статус **Неприкасаемый**!", ephemeral=True)
 
-    @discord.ui.button(label="Кастомная роль (10k)", style=discord.ButtonStyle.green, emoji="✨")
+    @discord.ui.button(label="Кастомная роль", style=discord.ButtonStyle.green, emoji="✨")
     async def buy_custom(self, interaction: discord.Interaction, button: discord.ui.Button):
         count = custom_roles_collection.count_documents({"user_id": interaction.user.id})
         if count >= 2:
             return await interaction.response.send_message("❌ У вас максимум кастомных ролей (2/2)!", ephemeral=True)
         
         coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
-        if coins < 10000: return await interaction.response.send_message("❌ Нужно 10 000 Колов!", ephemeral=True)
+        if coins < 10000: return await interaction.response.send_message("❌ Нужно **10,000** Колов!", ephemeral=True)
         await interaction.response.send_modal(CustomRoleModal(10000))
 
-    @discord.ui.button(label="Кастомный титул (5k)", style=discord.ButtonStyle.grey, emoji="👑")
+    @discord.ui.button(label="Кастомный титул", style=discord.ButtonStyle.grey, emoji="👑")
     async def buy_title(self, interaction: discord.Interaction, button: discord.ui.Button):
         price = 5000
         coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
-        if coins < price: return await interaction.response.send_message("❌ Нужно 5 000 Колов!", ephemeral=True)
+        if coins < price: return await interaction.response.send_message("❌ Нужно **5,000** Колов!", ephemeral=True)
         await interaction.response.send_modal(CustomTitleModal(5000))
 
 @bot.tree.command(name="shop", description="Интерактивный магазин Айнкрада")
 async def shop(interaction: discord.Interaction):
-    embed = discord.Embed(title="🛒 СИСТЕМНЫЙ МАГАЗИН АЙНКРАДА", description="Нажмите на кнопку ниже для покупки:", color=0x00BFFF)
-    embed.add_field(name="🛡️ Неприкасаемый", value="**15,000 Колов** (Иммунитет к грабежам)", inline=False)
-    embed.add_field(name="✨ Кастомная роль", value="**10,000 Колов** (Свое имя и цвет)", inline=False)
-    embed.add_field(name="👑 Кастомный титул", value="**5,000 Колов** (Титул в профиль)", inline=False)
+    embed = discord.Embed(
+        title="🛒 ИГРОВОЙ МАГАЗИН АЙНКРАДА", 
+        description="Приобретайте элитные статусы и уникальные предметы для кастомизации.", 
+        color=0x00BFFF
+    )
+    embed.add_field(
+        name="🛡️ Элитный статус «Неприкасаемый»", 
+        value="• **Цена:** `15,000` Колов\n• **Описание:** Надежный иммунитет от грабежей другими игроками.", 
+        inline=False
+    )
+    embed.add_field(
+        name="✨ Персональная Кастомная Роль", 
+        value="• **Цена:** `10,000` Колов\n• **Описание:** Личное название и уникальный цвет роли на сервере.", 
+        inline=False
+    )
+    embed.add_field(
+        name="👑 Уникальный Кастомный Титул", 
+        value="• **Цена:** `5,000` Колов\n• **Описание:** Красивый статус, отображаемый в вашем `/profile`.", 
+        inline=False
+    )
+    embed.set_footer(text="Aincrad Economy • Выберите товар кнопкой ниже")
     await interaction.response.send_message(embed=embed, view=ShopButtonsView())
 
-# --- МЕНЮ ГИЛЬДИЙ (/guild) ---
+# --- МЕНЮ ГИЛЬДИЙ (/guild) — ОБНОВЛЕННЫЙ ДИЗАЙН С ЛИДЕРОМ ---
 
 class GuildCreateModal(discord.ui.Modal, title="Создание новой гильдии"):
     guild_name = discord.ui.TextInput(label="Название гильдии", placeholder="KoB", max_length=30)
@@ -644,44 +673,46 @@ class GuildCreateModal(discord.ui.Modal, title="Создание новой ги
 
         price = 25000
         coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(uid)
-        if coins < price: return await interaction.response.send_message("❌ Нужно 25 000 Колов!", ephemeral=True)
+        if coins < price: return await interaction.response.send_message("❌ Для создания гильдии нужно **25,000** Колов!", ephemeral=True)
         
         if guilds_collection.find_one({"guild_name": name}):
-            return await interaction.response.send_message("❌ Название занято!", ephemeral=True)
+            return await interaction.response.send_message("❌ Гильдия с таким названием уже существует!", ephemeral=True)
 
         users_collection.update_one({"_id": uid}, {"$inc": {"coins": -price}, "$set": {"guild_id": name}})
         guilds_collection.insert_one({"guild_name": name, "leader_id": uid, "bank": 0, "level": 1})
-        await interaction.response.send_message(f"🏰 Гильдия **{name}** создана!", ephemeral=True)
+        await interaction.response.send_message(f"🏰 Гильдия **{name}** успешно создана! Вы назначены лидером.", ephemeral=True)
 
 class GuildButtonsView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
 
-    @discord.ui.button(label="Создать (25k)", style=discord.ButtonStyle.green, emoji="🏰")
+    @discord.ui.button(label="Создать гильдию", style=discord.ButtonStyle.green, emoji="🏰")
     async def btn_create(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(GuildCreateModal())
 
-    @discord.ui.button(label="Инфо", style=discord.ButtonStyle.blurple, emoji="🛡️")
+    @discord.ui.button(label="Информация", style=discord.ButtonStyle.blurple, emoji="🛡️")
     async def btn_info(self, interaction: discord.Interaction, button: discord.ui.Button):
         uid = interaction.user.id
         _, _, _, _, _, _, _, _, g_name, _ = get_or_create_user(uid)
-        if not g_name: return await interaction.response.send_message("❌ Вы не в гильдии!", ephemeral=True)
+        if not g_name: return await interaction.response.send_message("❌ Вы не состоите ни в одной гильдии!", ephemeral=True)
         
         g_data = guilds_collection.find_one({"guild_name": g_name})
         members = list(users_collection.find({"guild_id": g_name}))
-        members_str = ", ".join([f"<@{m['_id']}>" for m in members])
+        members_str = ", ".join([f"<@{m['_id']}>" for m in members]) if members else "Пусто"
 
-        embed = discord.Embed(title=f"🏰 ГИЛЬДИЯ: {g_name}", color=0x9B59B6)
-        embed.add_field(name="👑 Лидер", value=f"<@{g_data['leader_id']}>", inline=True)
-        embed.add_field(name="💰 Казна", value=f"{g_data.get('bank', 0):,} Колов", inline=True)
+        embed = discord.Embed(title=f"🛡️ СТАТУС ГИЛЬДИИ: {g_name}", description="Официальные данные объединения игроков", color=0x9B59B6)
+        embed.add_field(name="👑 Лидер команды", value=f"<@{g_data['leader_id']}>", inline=False)
+        embed.add_field(name="💰 Казна гильдии", value=f"**{g_data.get('bank', 0):,}** Колов", inline=True)
+        embed.add_field(name="⭐ Уровень", value=f"**{g_data.get('level', 1)}**", inline=True)
         embed.add_field(name=f"👥 Участники ({len(members)})", value=members_str, inline=False)
+        embed.set_footer(text="Aincrad Guild System")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="Покинуть", style=discord.ButtonStyle.red, emoji="🚪")
     async def btn_leave(self, interaction: discord.Interaction, button: discord.ui.Button):
         uid = interaction.user.id
         _, _, _, _, _, _, _, _, g_name, _ = get_or_create_user(uid)
-        if not g_name: return await interaction.response.send_message("❌ Вы не в гильдии.", ephemeral=True)
+        if not g_name: return await interaction.response.send_message("❌ Вы не состоите в гильдии.", ephemeral=True)
         
         g_data = guilds_collection.find_one({"guild_name": g_name})
         leader_id = g_data["leader_id"] if g_data else None
@@ -693,16 +724,22 @@ class GuildButtonsView(discord.ui.View):
             if new_member:
                 new_l_id = new_member["_id"]
                 guilds_collection.update_one({"guild_name": g_name}, {"$set": {"leader_id": new_l_id}})
-                await interaction.response.send_message(f"🚪 Вы вышли. Лидер передан <@{new_l_id}>.", ephemeral=True)
+                await interaction.response.send_message(f"🚪 Вы покинули гильдию. Новым лидером назначен <@{new_l_id}>.", ephemeral=True)
             else:
                 guilds_collection.delete_one({"guild_name": g_name})
-                await interaction.response.send_message("🚪 Вы вышли. Гильдия распущена.", ephemeral=True)
+                await interaction.response.send_message("🚪 Вы вышли. В гильдии не осталось участников, она распущена.", ephemeral=True)
         else:
-            await interaction.response.send_message("🚪 Вы покинули гильдию.", ephemeral=True)
+            await interaction.response.send_message("🚪 Вы успешно покинули гильдию.", ephemeral=True)
 
-@bot.tree.command(name="guild", description="Панель гильдий")
+@bot.tree.command(name="guild", description="Панель управления гильдиями")
 async def guild_menu(interaction: discord.Interaction):
-    embed = discord.Embed(title="🏰 ПАНЕЛЬ УПРАВЛЕНИЯ ГИЛЬДИЯМИ", description="Используйте кнопки ниже:", color=0x9B59B6)
+    embed = discord.Embed(
+        title="🏰 УПРАВЛЕНИЕ ГИЛЬДИЯМИ АЙНКРАДА", 
+        description="Объединяйте усилия с другими игроками, создавайте кланы и копите общую казну.\n\nИспользуйте кнопки ниже для управления:", 
+        color=0x9B59B6
+    )
+    embed.add_field(name="💰 Стоимость создания", value="`25,000` Колов", inline=True)
+    embed.add_field(name="⭐ Возможности", value="Общий банк и статус", inline=True)
     await interaction.response.send_message(embed=embed, view=GuildButtonsView())
 
 class SetTitleSelect(discord.ui.View):
@@ -716,17 +753,17 @@ class SetTitleSelect(discord.ui.View):
     async def select_callback(self, interaction: discord.Interaction):
         chosen_title = self.select.values[0]
         users_collection.update_one({"_id": interaction.user.id}, {"$set": {"special_title": chosen_title}})
-        await interaction.response.send_message(f"✅ Титул изменен на: **{chosen_title}**!", ephemeral=True)
+        await interaction.response.send_message(f"✅ Активный титул изменен на: **{chosen_title}**!", ephemeral=True)
 
-@bot.tree.command(name="settitle", description="Выбрать активный титул")
+@bot.tree.command(name="settitle", description="Выбрать активный титул в профиль")
 async def settitle(interaction: discord.Interaction):
     rows = list(titles_collection.find({"user_id": interaction.user.id}))
     if not rows:
-        return await interaction.response.send_message("❌ У вас нет купленных титулов!", ephemeral=True)
+        return await interaction.response.send_message("❌ У вас пока нет купленных титулов!", ephemeral=True)
     titles = [r["title_name"] for r in rows]
     await interaction.response.send_message(embed=discord.Embed(title="[ 👑 ВЫБОР ТИТУЛА ]", color=0xFFD700), view=SetTitleSelect(titles), ephemeral=True)
 
-# --- АУКЦИОН РОЛЕЙ ---
+# --- АУКЦИОН РОЛЕЙ (/auction) — ОБНОВЛЕННЫЙ ДИЗАЙН ---
 
 class SellRoleModal(discord.ui.Modal, title="Выставить роль на аукцион"):
     price_input = discord.ui.TextInput(label="Цена в Колах", placeholder="5000", max_length=10)
@@ -740,11 +777,10 @@ class SellRoleModal(discord.ui.Modal, title="Выставить роль на а
         try:
             price = int(self.price_input.value)
         except ValueError:
-            return await interaction.response.send_message("❌ Неверная цена!", ephemeral=True)
+            return await interaction.response.send_message("❌ Неверный формат цены!", ephemeral=True)
 
-        if price <= 0: return await interaction.response.send_message("❌ Цена > 0!", ephemeral=True)
+        if price <= 0: return await interaction.response.send_message("❌ Цена должна быть больше 0!", ephemeral=True)
 
-        # Генерируем уникальный sale_id как автоинкремент через поиск максимального
         last_item = auction_collection.find_one(sort=[("sale_id", -1)])
         next_sale_id = (last_item["sale_id"] + 1) if last_item and "sale_id" in last_item else 1
 
@@ -760,7 +796,7 @@ class SellRoleModal(discord.ui.Modal, title="Выставить роль на а
         if role: 
             try: await interaction.user.remove_roles(role)
             except: pass
-        await interaction.response.send_message(f"✅ Роль **{self.role_name}** выставлена за **{price:,}** Колов!", ephemeral=True)
+        await interaction.response.send_message(f"✅ Роль **{self.role_name}** успешно выставлена на аукцион за **{price:,}** Колов!", ephemeral=True)
 
 class SellRoleSelect(discord.ui.View):
     def __init__(self, roles_list):
@@ -779,21 +815,21 @@ class SellRoleSelect(discord.ui.View):
 class BuyAuctionSelect(discord.ui.View):
     def __init__(self, items_list):
         super().__init__(timeout=60)
-        options = [discord.SelectOption(label=item["role_name"], description=f"Цена: {item['price']:,} | Продавец: ID {item['seller_id']}", value=str(item["sale_id"])) for item in items_list]
-        self.select = discord.ui.Select(placeholder="Выберите роль для покупки...", options=options)
+        options = [discord.SelectOption(label=item["role_name"], description=f"Цена: {item['price']:,} Колов | Продавец ID: {item['seller_id']}", value=str(item["sale_id"])) for item in items_list]
+        self.select = discord.ui.Select(placeholder="Выберите лот для покупки...", options=options)
         self.select.callback = self.select_callback
         self.add_item(self.select)
 
     async def select_callback(self, interaction: discord.Interaction):
         sale_id = int(self.select.values[0])
         item = auction_collection.find_one({"sale_id": sale_id})
-        if not item: return await interaction.response.send_message("❌ Лот уже продан!", ephemeral=True)
+        if not item: return await interaction.response.send_message("❌ Этот лот уже продан!", ephemeral=True)
 
         role_id, seller_id, price, role_name = item["role_id"], item["seller_id"], item["price"], item["role_name"]
-        if interaction.user.id == seller_id: return await interaction.response.send_message("❌ Нельзя покупать свое!", ephemeral=True)
+        if interaction.user.id == seller_id: return await interaction.response.send_message("❌ Нельзя покупать собственные лоты!", ephemeral=True)
 
         buyer_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
-        if buyer_coins < price: return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
+        if buyer_coins < price: return await interaction.response.send_message("❌ Недостаточно средств для покупки!", ephemeral=True)
 
         users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -price}})
         users_collection.update_one({"_id": seller_id}, {"$inc": {"coins": price}})
@@ -805,9 +841,9 @@ class BuyAuctionSelect(discord.ui.View):
             try: await interaction.user.add_roles(role)
             except: pass
 
-        await interaction.response.edit_message(content=f"🎉 Вы купили роль **{role_name}** за **{price:,}** Колов!", embed=None, view=None)
+        await interaction.response.edit_message(content=f"🎉 Вы успешно приобрели уникальную роль **{role_name}** за **{price:,}** Колов!", embed=None, view=None)
 
-@bot.tree.command(name="auction", description="Аукцион кастомных ролей")
+@bot.tree.command(name="auction", description="Глобальный аукцион кастомных ролей")
 @app_commands.choices(action=[
     app_commands.Choice(name="Купить роль", value="list"),
     app_commands.Choice(name="Продать роль", value="sell")
@@ -816,26 +852,44 @@ async def auction(interaction: discord.Interaction, action: str):
     uid = interaction.user.id
     if action == "list":
         items = list(auction_collection.find())
-        if not items: return await interaction.response.send_message("📦 На аукционе пусто.", ephemeral=True)
-        embed = discord.Embed(title="[ 🏛️ АУКЦИОН РОЛЕЙ ]", color=0xFFD700)
+        if not items: 
+            return await interaction.response.send_message("📦 На текущий момент торговая площадка пуста.", ephemeral=True)
+        
+        embed = discord.Embed(
+            title="[ 🏛️ ГЛОБАЛЬНЫЙ АУКЦИОН РОЛЕЙ ]", 
+            description="Здесь игроки выставляют на продажу свои уникальные кастомные роли.\nВыберите интересующий лот в меню ниже:", 
+            color=0xFFD700
+        )
+        embed.set_footer(text="Aincrad Trading System")
         await interaction.response.send_message(embed=embed, view=BuyAuctionSelect(items), ephemeral=True)
+        
     elif action == "sell":
         rows = list(custom_roles_collection.find({"user_id": uid}))
-        if not rows: return await interaction.response.send_message("❌ У вас нет кастомных ролей!", ephemeral=True)
+        if not rows: 
+            return await interaction.response.send_message("❌ У вас нет кастомных ролей для продажи!", ephemeral=True)
+            
         user_roles = [interaction.guild.get_role(r["role_id"]) for r in rows if interaction.guild.get_role(r["role_id"])]
-        if not user_roles: return await interaction.response.send_message("❌ Роли не найдены.", ephemeral=True)
-        await interaction.response.send_message(embed=discord.Embed(title="[ 🏷️ ПРОДАЖА РОЛИ ]", color=0x2ECC71), view=SellRoleSelect(user_roles), ephemeral=True)
+        if not user_roles: 
+            return await interaction.response.send_message("❌ Ваши роли не найдены на сервере.", ephemeral=True)
+            
+        embed = discord.Embed(
+            title="[ 🏷️ ВЫСТАВЛЕНИЕ РОЛИ НА АУКЦИОН ]", 
+            description="Выберите роль из списка, которую хотите продать другим игрокам:", 
+            color=0x2ECC71
+        )
+        await interaction.response.send_message(embed=embed, view=SellRoleSelect(user_roles), ephemeral=True)
 
-@bot.tree.command(name="leaderboard", description="Топ-10 игроков")
+@bot.tree.command(name="leaderboard", description="Топ-10 игроков Айнкрада")
 async def leaderboard(interaction: discord.Interaction):
   top = list(users_collection.find().sort([("level", -1), ("coins", -1)]).limit(10))
   embed = discord.Embed(title="[ 🏆 ТОП-10 ИГРОКОВ АЙНКРАДА ]", color=0xFFD700)
   embed.description = "\n".join([f"`#{i}` <@{u['_id']}> — **{u.get('level', 1)} этаж** | {u.get('coins', 0):,} <:col:1530575386457542817>" for i, u in enumerate(top, 1)]) if top else "Пусто"
+  embed.set_footer(text="Рейтинг сильнейших игроков башни")
   await interaction.response.send_message(embed=embed)
 
 # --- АДМИНСКИЕ КОМАНДЫ ---
 
-@bot.tree.command(name="setlevel", description="[АДМИН] Установить этаж")
+@bot.tree.command(name="setlevel", description="[АДМИН] Установить этаж игроку")
 @app_commands.default_permissions(administrator=True)
 async def setlevel(interaction: discord.Interaction, member: discord.Member, level: int):
   get_or_create_user(member.id)
@@ -843,14 +897,14 @@ async def setlevel(interaction: discord.Interaction, member: discord.Member, lev
   await check_level_roles(member, level)
   await interaction.response.send_message(f"✅ Установлен {level} этаж для {member.mention}.", ephemeral=True)
 
-@bot.tree.command(name="givecoins", description="[АДМИН] Выдать Колы")
+@bot.tree.command(name="givecoins", description="[АДМИН] Выдать Колы игроку")
 @app_commands.default_permissions(administrator=True)
 async def givecoins(interaction: discord.Interaction, member: discord.Member, amount: int):
   get_or_create_user(member.id)
   users_collection.update_one({"_id": member.id}, {"$inc": {"coins": amount}})
-  await interaction.response.send_message(f"✅ Выдано {amount:,} Колов {member.mention}.", ephemeral=True)
+  await interaction.response.send_message(f"✅ Выдано {amount:,} Колов пользователю {member.mention}.", ephemeral=True)
 
-@bot.tree.command(name="resetdb", description="[АДМИН] Очистить базу данных")
+@bot.tree.command(name="resetdb", description="[АДМИН] Полная очистка базы данных")
 @app_commands.default_permissions(administrator=True)
 async def resetdb(interaction: discord.Interaction):
   users_collection.delete_many({})
