@@ -330,15 +330,17 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
 
     users_collection.update_one({"_id": attacker.id}, {"$set": {"last_rob": current_time}})
 
-    gif_url = "https://i.pinimg.com/originals/58/23/81/582381e4e65d4f6a027116695445d649.gif"
+    # Отправляем интригующее сообщение БЕЗ гифки
     embed_loading = discord.Embed(title="[ 🕵️ ОГРАБЛЕНИЕ ]", description=f"Вы тихо подкрадываетесь к {member.mention}...", color=0x2C3E50)
-    embed_loading.set_image(url=gif_url)
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
     success = random.choice([True, False]) # 50/50 честный шанс
+    
+    # Ссылка на гифку для итогового сообщения
+    gif_url = "https://i.pinimg.com/originals/58/23/81/582381e4e65d4f6a027116695445d649.gif"
     embed_res = discord.Embed(title="[ 🕵️ ИТОГ ОГРАБЛЕНИЯ ]")
-    embed_res.set_image(url=gif_url) # Гифка остается
+    embed_res.set_image(url=gif_url) # Гифка появляется только здесь, в финале!
 
     if success:
         users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": potential_amount}})
@@ -352,7 +354,7 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
         embed_res.color = 0xE74C3C
 
     await interaction.edit_original_response(embed=embed_res)
-
+    
 # --- АЗАРТНЫЕ ИГРЫ ---
 
 @bot.tree.command(name="dice", description="Бросить кости против системы (Мин. ставка: 50)")
