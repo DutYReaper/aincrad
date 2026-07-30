@@ -1,4 +1,5 @@
 import os
+import certifi
 import random
 import time
 import asyncio
@@ -11,8 +12,8 @@ from keep_alive import keep_alive
 # Достаем ссылку на базу из переменных окружения Render
 MONGO_URI = os.getenv('MONGO_URI')
 
-# Подключаемся к нашему облачному кластеру MongoDB Atlas
-cluster = MongoClient(MONGO_URI)
+# Подключаемся с поддержкой сертификатов certifi
+cluster = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = cluster.aincrad_data
 users_collection = db.users
 custom_roles_collection = db.custom_roles
