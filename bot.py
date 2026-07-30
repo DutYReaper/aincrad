@@ -397,7 +397,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
 
   result = random.choice(["орел", "решка"])
   embed_res = discord.Embed(title="[ 🪙 ИТОГ ПОДБРОСА ]", color=0x2ECC71)
-  embed_res.set_image(url=gif_url)
+  # Строчка с set_image для итогового результата удалена отсюда!
   
   if choice == result:
       users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
