@@ -8,18 +8,17 @@ from discord import app_commands
 from discord.ext import commands
 from keep_alive import keep_alive
 
-# Достаем ту самую ссылку, которую мы спрятали на Render
+# Достаем ссылку на базу из переменных окружения Render
 MONGO_URI = os.getenv('MONGO_URI')
 
-# Подключаемся к нашему облачному кластеру
+# Подключаемся к нашему облачному кластеру MongoDB Atlas
 cluster = MongoClient(MONGO_URI)
-
-# Создаем саму базу данных 
 db = cluster.aincrad_data
-
-# Создаем коллекцию (это как таблица, где будут лежать профили участников)
-# MongoDB работает с данными точно так же, как классические словари (dict) в Python, поэтому поиск и базовые алгоритмы будут работать очень быстро.
 users_collection = db.users
+custom_roles_collection = db.custom_roles
+auction_collection = db.auction_roles
+titles_collection = db.user_titles
+guilds_collection = db.guilds
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -36,113 +35,37 @@ bot = commands.Bot(
 # Глобальный флаг режима техобслуживания (бета-тест)
 MAINTENANCE_MODE = False
 
-def init_db():
-    db = sqlite3.connect("database.db")
-    cursor = db.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        coins INTEGER DEFAULT 100,
-        xp INTEGER DEFAULT 0,
-        level INTEGER DEFAULT 1,
-        last_daily REAL DEFAULT 0,
-        last_work REAL DEFAULT 0,
-        last_crime REAL DEFAULT 0,
-        last_rob REAL DEFAULT 0,
-        streak INTEGER DEFAULT 0,
-        guild_id TEXT DEFAULT NULL,
-        special_title TEXT DEFAULT 'Отсутствует'
-    )
-    """)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS custom_roles (
-        role_id INTEGER PRIMARY KEY,
-        user_id INTEGER,
-        role_name TEXT
-    )
-    """)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS auction_roles (
-        sale_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        role_id INTEGER,
-        seller_id INTEGER,
-        price INTEGER,
-        role_name TEXT
-    )
-    """)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS user_titles (
-        user_id INTEGER,
-        title_name TEXT
-    )
-    """)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS guilds (
-        guild_name TEXT PRIMARY KEY,
-        leader_id INTEGER,
-        bank INTEGER DEFAULT 0,
-        level INTEGER DEFAULT 1,
-        entry_fee INTEGER DEFAULT 0,
-        is_private INTEGER DEFAULT 0,
-        last_daily REAL DEFAULT 0
-    )
-    """)
-    db.commit()
-    db.close()
-
-init_db()
-
-def execute_db(query, params=(), fetchone=False, fetchall=False, commit=False):
-    db = sqlite3.connect("database.db", timeout=10.0)
-    cursor = db.cursor()
-    cursor.execute(query, params)
-    res = None
-    if fetchone:
-        res = cursor.fetchone()
-    elif fetchall:
-        res = cursor.fetchall()
-    if commit:
-        db.commit()
-    db.close()
-    return res
-
-for col_sql in [
-    "ALTER TABLE users ADD COLUMN last_daily REAL DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN last_work REAL DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN last_crime REAL DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN last_rob REAL DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN streak INTEGER DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN guild_id TEXT DEFAULT NULL",
-    "ALTER TABLE users ADD COLUMN special_title TEXT DEFAULT 'Отсутствует'",
-    "ALTER TABLE guilds ADD COLUMN entry_fee INTEGER DEFAULT 0",
-    "ALTER TABLE guilds ADD COLUMN is_private INTEGER DEFAULT 0",
-    "ALTER TABLE guilds ADD COLUMN last_daily REAL DEFAULT 0"
-]:
-    try:
-        execute_db(col_sql, commit=True)
-    except sqlite3.OperationalError:
-        pass
-
-ROLES_MAPPING = {
-    2: {"name": "Начало Легенды (LVL 2)", "min_daily": 60, "max_daily": 80},
-    5: {"name": "Путешественник (LVL 5)", "min_daily": 70, "max_daily": 100},
-    10: {"name": "Разведчик Рубежа (LVL 10)", "min_daily": 90, "max_daily": 130},
-    15: {"name": "Опытный Мечник (LVL 15)", "min_daily": 110, "max_daily": 150},
-    20: {"name": "Передовой Воин (LVL 20)", "min_daily": 140, "max_daily": 180},
-    30: {"name": "Закаленный Огнем (LVL 30)", "min_daily": 170, "max_daily": 220},
-    40: {"name": "Мастер клинка (LVL 40)", "min_daily": 210, "max_daily": 270},
-    50: {"name": "Герой Айнкрада (LVL 50)", "min_daily": 260, "max_daily": 340},
-    65: {"name": "Грандмастер (LVL 65)", "min_daily": 350, "max_daily": 450},
-    80: {"name": "Вершитель Судеб (LVL 80)", "min_daily": 480, "max_daily": 650},
-    100: {"name": "Beater (LVL 100)", "min_daily": 800, "max_daily": 1000},
-}
-
 def get_or_create_user(user_id):
-    row = execute_db("SELECT coins, xp, level, last_daily, last_work, last_crime, last_rob, streak, guild_id, special_title FROM users WHERE user_id = ?", (user_id,), fetchone=True)
-    if row is None:
-        execute_db("INSERT INTO users (user_id) VALUES (?)", (user_id,), commit=True)
-        return 100, 0, 1, 0, 0, 0, 0, 0, None, 'Отсутствует'
-    return row
+    user = users_collection.find_one({"_id": user_id})
+    if user is None:
+        new_user = {
+            "_id": user_id,
+            "coins": 100,
+            "xp": 0,
+            "level": 1,
+            "last_daily": 0.0,
+            "last_work": 0.0,
+            "last_crime": 0.0,
+            "last_rob": 0.0,
+            "streak": 0,
+            "guild_id": None,
+            "special_title": "Отсутствует"
+        }
+        users_collection.insert_one(new_user)
+        return 100, 0, 1, 0.0, 0.0, 0.0, 0.0, 0, None, 'Отсутствует'
+    
+    return (
+        user.get("coins", 100),
+        user.get("xp", 0),
+        user.get("level", 1),
+        user.get("last_daily", 0.0),
+        user.get("last_work", 0.0),
+        user.get("last_crime", 0.0),
+        user.get("last_rob", 0.0),
+        user.get("streak", 0),
+        user.get("guild_id", None),
+        user.get("special_title", "Отсутствует")
+    )
 
 def is_admin_or_mod(member: discord.Member):
     if member.guild_permissions.administrator:
@@ -192,6 +115,20 @@ async def check_level_roles(member: discord.Member, current_level: int):
         except Exception:
             pass
 
+ROLES_MAPPING = {
+    2: {"name": "Начало Легенды (LVL 2)", "min_daily": 60, "max_daily": 80},
+    5: {"name": "Путешественник (LVL 5)", "min_daily": 70, "max_daily": 100},
+    10: {"name": "Разведчик Рубежа (LVL 10)", "min_daily": 90, "max_daily": 130},
+    15: {"name": "Опытный Мечник (LVL 15)", "min_daily": 110, "max_daily": 150},
+    20: {"name": "Передовой Воин (LVL 20)", "min_daily": 140, "max_daily": 180},
+    30: {"name": "Закаленный Огнем (LVL 30)", "min_daily": 170, "max_daily": 220},
+    40: {"name": "Мастер клинка (LVL 40)", "min_daily": 210, "max_daily": 270},
+    50: {"name": "Герой Айнкрада (LVL 50)", "min_daily": 260, "max_daily": 340},
+    65: {"name": "Грандмастер (LVL 65)", "min_daily": 350, "max_daily": 450},
+    80: {"name": "Вершитель Судеб (LVL 80)", "min_daily": 480, "max_daily": 650},
+    100: {"name": "Beater (LVL 100)", "min_daily": 800, "max_daily": 1000},
+}
+
 async def add_xp(interaction, user_id, amount):
     coins, xp, level, _, _, _, _, _, _, _ = get_or_create_user(user_id)
     xp += amount
@@ -204,7 +141,7 @@ async def add_xp(interaction, user_id, amount):
         next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
         leveled_up = True
 
-    execute_db("UPDATE users SET xp = ?, level = ? WHERE user_id = ?", (xp, level, user_id), commit=True)
+    users_collection.update_one({"_id": user_id}, {"$set": {"xp": xp, "level": level}})
 
     if leveled_up:
         member = getattr(interaction, 'user', None)
@@ -282,8 +219,8 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
     return await interaction.response.send_message("❌ Недостаточно средств на счете!", ephemeral=True)
 
   get_or_create_user(member.id)
-  execute_db("UPDATE users SET coins = coins - ? WHERE user_id = ?", (amount, interaction.user.id), commit=True)
-  execute_db("UPDATE users SET coins = coins + ? WHERE user_id = ?", (amount, member.id), commit=True)
+  users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
+  users_collection.update_one({"_id": member.id}, {"$inc": {"coins": amount}})
 
   embed = discord.Embed(title="[ 💸 МЕЖБАНКОВСКИЙ ПЕРЕВОД ]", color=0x00FF00)
   embed.description = f"Успешно переведено **{amount:,}** <:col:1530575386457542817> для {member.mention}!"
@@ -310,7 +247,7 @@ async def daily(interaction: discord.Interaction):
   reward_coins = int(base_coins * multiplier)
   reward_xp = int(base_xp * multiplier)
 
-  execute_db("UPDATE users SET coins = coins + ?, streak = ?, last_daily = ? WHERE user_id = ?", (reward_coins, streak, current_time, user_id), commit=True)
+  users_collection.update_one({"_id": user_id}, {"$inc": {"coins": reward_coins}, "$set": {"streak": streak, "last_daily": current_time}})
   await add_xp(interaction, user_id, reward_xp)
 
   embed = discord.Embed(title="[ 🎁 ЕЖЕДНЕВНАЯ НАГРАДА И СТРИК ]", color=0x00FF00)
@@ -330,7 +267,7 @@ async def work(interaction: discord.Interaction):
   job_desc = "Зачистка подземелья" if level > 20 else "Сбор ресурсов в стартовой зоне"
   earned = random.randint(40, 120) + (level * 2)
   
-  execute_db("UPDATE users SET coins = coins + ?, last_work = ? WHERE user_id = ?", (earned, current_time, user_id), commit=True)
+  users_collection.update_one({"_id": user_id}, {"$inc": {"coins": earned}, "$set": {"last_work": current_time}})
   await add_xp(interaction, user_id, random.randint(10, 20))
 
   embed = discord.Embed(title="[ 🛠️ РАБОТА В АЙНКРАДЕ ]", color=0x3498DB)
@@ -350,13 +287,14 @@ async def crime(interaction: discord.Interaction):
   success = random.choice([True, False])
   if success:
       reward = random.randint(50, 130) + (level * 2)
-      execute_db("UPDATE users SET coins = coins + ?, last_crime = ? WHERE user_id = ?", (reward, current_time, user_id), commit=True)
+      users_collection.update_one({"_id": user_id}, {"$inc": {"coins": reward}, "$set": {"last_crime": current_time}})
       await add_xp(interaction, user_id, 15)
       embed = discord.Embed(title="[ 🥷 КРИМИНАЛЬНЫЙ УСПЕХ ]", color=0x2ECC71)
       embed.description = f"Куш сорван! Получено **{reward}** Колов <:col:1530575386457542817>!"
   else:
       fine = random.randint(30, 70)
-      execute_db("UPDATE users SET coins = MAX(0, coins - ?), last_crime = ? WHERE user_id = ?", (fine, current_time, user_id), commit=True)
+      new_coins = max(0, coins - fine)
+      users_collection.update_one({"_id": user_id}, {"$set": {"coins": new_coins, "last_crime": current_time}})
       embed = discord.Embed(title="[ ❌ ПОЙМАН СТРАЖЕЙ ]", color=0xE74C3C)
       embed.description = f"Вас поймали! Штраф: **{fine}** Колов <:col:1530575386457542817>."
   await interaction.response.send_message(embed=embed)
@@ -383,12 +321,12 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
     if target_coins < 200:
         return await interaction.response.send_message(f"❌ У игрока недостаточно средств для грабежа.", ephemeral=True)
 
-    execute_db("UPDATE users SET last_rob = ? WHERE user_id = ?", (current_time, attacker.id), commit=True)
+    users_collection.update_one({"_id": attacker.id}, {"$set": {"last_rob": current_time}})
 
     if random.randint(1, 100) <= 40:
         stolen = int(target_coins * random.uniform(0.10, 0.20))
-        execute_db("UPDATE users SET coins = coins + ? WHERE user_id = ?", (stolen, attacker.id), commit=True)
-        execute_db("UPDATE users SET coins = coins - ? WHERE user_id = ?", (stolen, member.id), commit=True)
+        users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": stolen}})
+        users_collection.update_one({"_id": member.id}, {"$inc": {"coins": -stolen}})
         await add_xp(interaction, attacker.id, 20)
         embed = discord.Embed(title="[ 🥷 УСПЕШНОЕ ОГРАБЛЕНИЕ ]", color=0x2ECC71)
         embed.description = f"💥 Вы вытащили **{stolen}** Колов у {member.mention}!"
@@ -396,7 +334,8 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
         await interaction.response.send_message(embed=embed)
     else:
         fine = random.randint(40, 90)
-        execute_db("UPDATE users SET coins = MAX(0, coins - ?) WHERE user_id = ?", (fine, attacker.id), commit=True)
+        new_att_coins = max(0, att_coins - fine)
+        users_collection.update_one({"_id": attacker.id}, {"$set": {"coins": new_att_coins}})
         embed = discord.Embed(title="[ ❌ ПРОВАЛ ОГРАБЛЕНИЯ ]", color=0xE74C3C)
         embed.description = f"🚨 Стража поймала вас! Штраф: **{fine}** Колов."
         embed.set_image(url="https://i.pinimg.com/originals/1d/85/80/1d8580859a663c8c58d2aa9ff9dc87c8.gif")
@@ -412,7 +351,7 @@ async def dice(interaction: discord.Interaction, amount: int):
   coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
   if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
 
-  execute_db("UPDATE users SET coins = coins - ? WHERE user_id = ?", (amount, interaction.user.id), commit=True)
+  users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
   embed_loading = discord.Embed(title="[ 🎲 КОСТИ АЙНКРАДА ]", description="Бросаем кости...", color=0x9B59B6)
   embed_loading.set_image(url="https://i.pinimg.com/originals/80/9f/ba/809fba531ccbb8e24010696ffa1503e2.gif")
@@ -424,14 +363,14 @@ async def dice(interaction: discord.Interaction, amount: int):
   embed_res.set_image(url="https://i.pinimg.com/originals/80/9f/ba/809fba531ccbb8e24010696ffa1503e2.gif")
 
   if p_roll > b_roll:
-      execute_db("UPDATE users SET coins = coins + ? WHERE user_id = ?", (amount * 2, interaction.user.id), commit=True)
+      users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
       embed_res.description = f"🎉 **Победа!** Вы выбросили `🎲 {p_roll}`, бот — `🤖 {b_roll}`.\nВыиграно: **{amount}** Колов!"
       embed_res.color = 0x2ECC71
   elif p_roll < b_roll:
       embed_res.description = f"💀 **Поражение.** Вы выбросили `🎲 {p_roll}`, бот — `🤖 {b_roll}`.\nПотеряно: **{amount}** Колов."
       embed_res.color = 0xE74C3C
   else:
-      execute_db("UPDATE users SET coins = coins + ? WHERE user_id = ?", (amount, interaction.user.id), commit=True)
+      users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount}})
       embed_res.description = f"🤝 **Ничья.** Обычные кости (`{p_roll}:{b_roll}`). Ставка возвращена."
       embed_res.color = 0xF1C40F
   
@@ -447,7 +386,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
   coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
   if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
 
-  execute_db("UPDATE users SET coins = coins - ? WHERE user_id = ?", (amount, interaction.user.id), commit=True)
+  users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
   gif_url = "https://media1.tenor.com/m/9PALsSO_XpsAAAAC/misaka-mikoto.gif"
   embed_loading = discord.Embed(title="[ 🪙 ОРЕЛ И РЕШКА ]", description="Монетка подброшена в воздух...", color=0xF1C40F)
@@ -460,7 +399,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
   embed_res.set_image(url=gif_url)
   
   if choice == result:
-      execute_db("UPDATE users SET coins = coins + ? WHERE user_id = ?", (amount * 2, interaction.user.id), commit=True)
+      users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
       embed_res.description = f"🎉 Выпал **{result.upper()}**! Вы угадали и выиграли **{amount:,}** Колов!"
   else:
       embed_res.description = f"❌ Выпал **{result.upper()}**. Увы, вы проиграли **{amount:,}** Колов."
@@ -477,7 +416,7 @@ async def roulette(interaction: discord.Interaction, amount: int):
   coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
   if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
 
-  execute_db("UPDATE users SET coins = coins - ? WHERE user_id = ?", (amount, interaction.user.id), commit=True)
+  users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
   embed_loading = discord.Embed(title="[ 🎯 РУССКАЯ РУЛЕТКА ]", description="Барабан вращается...", color=0xE74C3C)
   embed_loading.set_image(url="https://i.pinimg.com/originals/ac/56/c5/ac56c5c7e6037a698e22c9a30a8dccda.gif")
@@ -488,7 +427,7 @@ async def roulette(interaction: discord.Interaction, amount: int):
   embed_res = discord.Embed(title="[ 🎯 РУССКАЯ РУЛЕТКА ]", color=0xE74C3C)
   embed_res.set_image(url="https://i.pinimg.com/originals/ac/56/c5/ac56c5c7e6037a698e22c9a30a8dccda.gif")
   if not shot:
-      execute_db("UPDATE users SET coins = coins + ? WHERE user_id = ?", (amount * 2, interaction.user.id), commit=True)
+      users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
       embed_res.description = f"💥 *ЩЕЛК!* Барабан пуст. Вам повезло, вы выиграли **{amount:,}** Колов!"
       embed_res.color = 0x2ECC71
   else:
@@ -510,7 +449,7 @@ class EditRoleModal(discord.ui.Modal, title="Изменение кастомно
 
     async def on_submit(self, interaction: discord.Interaction):
         new_name = self.role_name.value.strip()
-        exists = execute_db("SELECT role_id FROM custom_roles WHERE LOWER(role_name) = LOWER(?) AND role_id != ?", (new_name, self.role.id), fetchone=True)
+        exists = custom_roles_collection.find_one({"role_name": {"$regex": f"^{new_name}$", "$options": "i"}, "role_id": {"$ne": self.role.id}})
         if exists or discord.utils.get(interaction.guild.roles, name=new_name):
             return await interaction.response.send_message("❌ Роль с таким названием уже существует на сервере!", ephemeral=True)
 
@@ -519,11 +458,10 @@ class EditRoleModal(discord.ui.Modal, title="Изменение кастомно
         except ValueError:
             return await interaction.response.send_message("❌ Неверный формат HEX-цвета!", ephemeral=True)
 
-        execute_db("UPDATE users SET coins = coins - ? WHERE user_id = ?", (self.price, interaction.user.id), commit=True)
-
+        users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -self.price}})
         await self.role.edit(name=new_name, color=discord.Color(color_int))
-        execute_db("UPDATE custom_roles SET role_name = ? WHERE role_id = ?", (new_name, self.role.id), commit=True)
-        execute_db("UPDATE auction_roles SET role_name = ? WHERE role_id = ?", (new_name, self.role.id), commit=True)
+        custom_roles_collection.update_one({"role_id": self.role.id}, {"$set": {"role_name": new_name}})
+        auction_collection.update_one({"role_id": self.role.id}, {"$set": {"role_name": new_name}})
         await interaction.response.send_message(f"✅ Роль успешно изменена на **{new_name}**!", ephemeral=True)
 
 class EditRoleSelect(discord.ui.View):
@@ -548,11 +486,11 @@ async def editrole(interaction: discord.Interaction):
     if coins < 3000:
         return await interaction.response.send_message("❌ Нужно минимум 3 000 Колов!", ephemeral=True)
 
-    rows = execute_db("SELECT role_id FROM custom_roles WHERE user_id = ?", (interaction.user.id,), fetchall=True)
+    rows = list(custom_roles_collection.find({"user_id": interaction.user.id}))
     if not rows:
         return await interaction.response.send_message("❌ У вас нет купленных кастомных ролей!", ephemeral=True)
 
-    user_roles = [interaction.guild.get_role(r[0]) for r in rows if interaction.guild.get_role(r[0])]
+    user_roles = [interaction.guild.get_role(r["role_id"]) for r in rows if interaction.guild.get_role(r["role_id"])]
     if not user_roles:
         return await interaction.response.send_message("❌ Ваши кастомные роли не найдены на сервере.", ephemeral=True)
 
@@ -573,9 +511,9 @@ class DeleteRoleSelect(discord.ui.View):
         role_id = int(self.select.values[0])
         role = interaction.guild.get_role(role_id)
         
-        execute_db("UPDATE users SET coins = coins - ? WHERE user_id = ?", (self.price, interaction.user.id), commit=True)
-        execute_db("DELETE FROM custom_roles WHERE role_id = ?", (role_id,), commit=True)
-        execute_db("DELETE FROM auction_roles WHERE role_id = ?", (role_id,), commit=True)
+        users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -self.price}})
+        custom_roles_collection.delete_one({"role_id": role_id})
+        auction_collection.delete_one({"role_id": role_id})
 
         if role:
             try:
@@ -591,11 +529,11 @@ async def deleterole(interaction: discord.Interaction):
     if coins < 5000:
         return await interaction.response.send_message("❌ Для удаления роли нужно 5 000 Колов!", ephemeral=True)
 
-    rows = execute_db("SELECT role_id FROM custom_roles WHERE user_id = ?", (interaction.user.id,), fetchall=True)
+    rows = list(custom_roles_collection.find({"user_id": interaction.user.id}))
     if not rows:
         return await interaction.response.send_message("❌ У вас нет кастомных ролей для удаления!", ephemeral=True)
 
-    user_roles = [interaction.guild.get_role(r[0]) for r in rows if interaction.guild.get_role(r[0])]
+    user_roles = [interaction.guild.get_role(r["role_id"]) for r in rows if interaction.guild.get_role(r["role_id"])]
     if not user_roles:
         return await interaction.response.send_message("❌ Роли не найдены на сервере.", ephemeral=True)
 
@@ -614,7 +552,7 @@ class CustomRoleModal(discord.ui.Modal, title="Создание уникальн
     async def on_submit(self, interaction: discord.Interaction):
         r_name = self.role_name.value.strip()
 
-        exists = execute_db("SELECT role_id FROM custom_roles WHERE LOWER(role_name) = LOWER(?)", (r_name,), fetchone=True)
+        exists = custom_roles_collection.find_one({"role_name": {"$regex": f"^{r_name}$", "$options": "i"}})
         if exists or discord.utils.get(interaction.guild.roles, name=r_name):
             return await interaction.response.send_message("❌ Ошибка: Роль с таким названием уже существует!", ephemeral=True)
 
@@ -623,15 +561,15 @@ class CustomRoleModal(discord.ui.Modal, title="Создание уникальн
         except ValueError:
             return await interaction.response.send_message("❌ Неверный формат HEX-цвета!", ephemeral=True)
 
-        execute_db("UPDATE users SET coins = coins - ? WHERE user_id = ?", (self.price, interaction.user.id), commit=True)
+        users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -self.price}})
         
         try:
             new_role = await interaction.guild.create_role(name=r_name, color=discord.Color(color_int))
             await interaction.user.add_roles(new_role)
-            execute_db("INSERT INTO custom_roles (role_id, user_id, role_name) VALUES (?, ?, ?)", (new_role.id, interaction.user.id, r_name), commit=True)
+            custom_roles_collection.insert_one({"role_id": new_role.id, "user_id": interaction.user.id, "role_name": r_name})
             await interaction.response.send_message(f"✅ Уникальная кастомная роль **{r_name}** создана и выдана!", ephemeral=True)
         except Exception:
-            execute_db("UPDATE users SET coins = coins + ? WHERE user_id = ?", (self.price, interaction.user.id), commit=True)
+            users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": self.price}})
             await interaction.response.send_message("❌ Ошибка создания. Средства возвращены.", ephemeral=True)
 
 class CustomTitleModal(discord.ui.Modal, title="Покупка кастомного титула"):
@@ -643,8 +581,8 @@ class CustomTitleModal(discord.ui.Modal, title="Покупка кастомно�
 
     async def on_submit(self, interaction: discord.Interaction):
         t_text = self.title_text.value.strip()
-        execute_db("UPDATE users SET coins = coins - ?, special_title = ? WHERE user_id = ?", (self.price, t_text, interaction.user.id), commit=True)
-        execute_db("INSERT INTO user_titles (user_id, title_name) VALUES (?, ?)", (interaction.user.id, t_text), commit=True)
+        users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -self.price}, "$set": {"special_title": t_text}})
+        titles_collection.insert_one({"user_id": interaction.user.id, "title_name": t_text})
         await interaction.response.send_message(f"👑 Поздравляем! Вы приобрели кастомный титул **{t_text}**!", ephemeral=True)
 
 # --- ИНТЕРАКТИВНОЕ МЕНЮ МАГАЗИНА (/shop) ---
@@ -663,14 +601,13 @@ class ShopButtonsView(discord.ui.View):
         coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
         if coins < price: return await interaction.response.send_message("❌ Нужно 15 000 Колов!", ephemeral=True)
         
-        execute_db("UPDATE users SET coins = coins - ? WHERE user_id = ?", (price, interaction.user.id), commit=True)
+        users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -price}})
         if role: await interaction.user.add_roles(role)
         await interaction.response.send_message(f"🎉 Вы успешно приобрели статус **Неприкасаемый**!", ephemeral=True)
 
     @discord.ui.button(label="Кастомная роль (10k)", style=discord.ButtonStyle.green, emoji="✨")
     async def buy_custom(self, interaction: discord.Interaction, button: discord.ui.Button):
-        count_res = execute_db("SELECT COUNT(*) FROM custom_roles WHERE user_id = ?", (interaction.user.id,), fetchone=True)
-        count = count_res[0] if count_res else 0
+        count = custom_roles_collection.count_documents({"user_id": interaction.user.id})
         if count >= 2:
             return await interaction.response.send_message("❌ У вас максимум кастомных ролей (2/2)!", ephemeral=True)
         
@@ -701,18 +638,18 @@ class GuildCreateModal(discord.ui.Modal, title="Создание новой ги
     async def on_submit(self, interaction: discord.Interaction):
         uid = interaction.user.id
         name = self.guild_name.value.strip()
-        user_g = execute_db("SELECT guild_id FROM users WHERE user_id = ?", (uid,), fetchone=True)
-        if user_g and user_g[0]: return await interaction.response.send_message("❌ Вы уже состоите в гильдии!", ephemeral=True)
+        _, _, _, _, _, _, _, _, user_g, _ = get_or_create_user(uid)
+        if user_g: return await interaction.response.send_message("❌ Вы уже состоите в гильдии!", ephemeral=True)
 
         price = 25000
         coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(uid)
         if coins < price: return await interaction.response.send_message("❌ Нужно 25 000 Колов!", ephemeral=True)
         
-        if execute_db("SELECT * FROM guilds WHERE guild_name = ?", (name,), fetchone=True):
+        if guilds_collection.find_one({"guild_name": name}):
             return await interaction.response.send_message("❌ Название занято!", ephemeral=True)
 
-        execute_db("UPDATE users SET coins = coins - ?, guild_id = ? WHERE user_id = ?", (price, name, uid), commit=True)
-        execute_db("INSERT INTO guilds (guild_name, leader_id) VALUES (?, ?)", (name, uid), commit=True)
+        users_collection.update_one({"_id": uid}, {"$inc": {"coins": -price}, "$set": {"guild_id": name}})
+        guilds_collection.insert_one({"guild_name": name, "leader_id": uid, "bank": 0, "level": 1})
         await interaction.response.send_message(f"🏰 Гильдия **{name}** создана!", ephemeral=True)
 
 class GuildButtonsView(discord.ui.View):
@@ -726,37 +663,38 @@ class GuildButtonsView(discord.ui.View):
     @discord.ui.button(label="Инфо", style=discord.ButtonStyle.blurple, emoji="🛡️")
     async def btn_info(self, interaction: discord.Interaction, button: discord.ui.Button):
         uid = interaction.user.id
-        row = execute_db("SELECT guild_id FROM users WHERE user_id = ?", (uid,), fetchone=True)
-        if not row or not row[0]: return await interaction.response.send_message("❌ Вы не в гильдии!", ephemeral=True)
+        _, _, _, _, _, _, _, _, g_name, _ = get_or_create_user(uid)
+        if not g_name: return await interaction.response.send_message("❌ Вы не в гильдии!", ephemeral=True)
         
-        g_name = row[0]
-        g_data = execute_db("SELECT leader_id, bank FROM guilds WHERE guild_name = ?", (g_name,), fetchone=True)
-        members = execute_db("SELECT user_id FROM users WHERE guild_id = ?", (g_name,), fetchall=True)
-        members_str = ", ".join([f"<@{m[0]}>" for m in members])
+        g_data = guilds_collection.find_one({"guild_name": g_name})
+        members = list(users_collection.find({"guild_id": g_name}))
+        members_str = ", ".join([f"<@{m['_id']}>" for m in members])
 
         embed = discord.Embed(title=f"🏰 ГИЛЬДИЯ: {g_name}", color=0x9B59B6)
-        embed.add_field(name="👑 Лидер", value=f"<@{g_data[0]}>", inline=True)
-        embed.add_field(name="💰 Казна", value=f"{g_data[1]:,} Колов", inline=True)
+        embed.add_field(name="👑 Лидер", value=f"<@{g_data['leader_id']}>", inline=True)
+        embed.add_field(name="💰 Казна", value=f"{g_data.get('bank', 0):,} Колов", inline=True)
         embed.add_field(name=f"👥 Участники ({len(members)})", value=members_str, inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="Покинуть", style=discord.ButtonStyle.red, emoji="🚪")
     async def btn_leave(self, interaction: discord.Interaction, button: discord.ui.Button):
         uid = interaction.user.id
-        row = execute_db("SELECT guild_id FROM users WHERE user_id = ?", (uid,), fetchone=True)
-        if not row or not row[0]: return await interaction.response.send_message("❌ Вы не в гильдии.", ephemeral=True)
+        _, _, _, _, _, _, _, _, g_name, _ = get_or_create_user(uid)
+        if not g_name: return await interaction.response.send_message("❌ Вы не в гильдии.", ephemeral=True)
         
-        g_name = row[0]
-        leader_id = execute_db("SELECT leader_id FROM guilds WHERE guild_name = ?", (g_name,), fetchone=True)[0]
-        execute_db("UPDATE users SET guild_id = NULL WHERE user_id = ?", (uid,), commit=True)
+        g_data = guilds_collection.find_one({"guild_name": g_name})
+        leader_id = g_data["leader_id"] if g_data else None
+        
+        users_collection.update_one({"_id": uid}, {"$set": {"guild_id": None}})
         
         if leader_id == uid:
-            new_l = execute_db("SELECT user_id FROM users WHERE guild_id = ? LIMIT 1", (g_name,), fetchone=True)
-            if new_l:
-                execute_db("UPDATE guilds SET leader_id = ? WHERE guild_name = ?", (new_l[0], g_name), commit=True)
-                await interaction.response.send_message(f"🚪 Вы вышли. Лидер передан <@{new_l[0]}>.", ephemeral=True)
+            new_member = users_collection.find_one({"guild_id": g_name})
+            if new_member:
+                new_l_id = new_member["_id"]
+                guilds_collection.update_one({"guild_name": g_name}, {"$set": {"leader_id": new_l_id}})
+                await interaction.response.send_message(f"🚪 Вы вышли. Лидер передан <@{new_l_id}>.", ephemeral=True)
             else:
-                execute_db("DELETE FROM guilds WHERE guild_name = ?", (g_name,), commit=True)
+                guilds_collection.delete_one({"guild_name": g_name})
                 await interaction.response.send_message("🚪 Вы вышли. Гильдия распущена.", ephemeral=True)
         else:
             await interaction.response.send_message("🚪 Вы покинули гильдию.", ephemeral=True)
@@ -776,15 +714,15 @@ class SetTitleSelect(discord.ui.View):
 
     async def select_callback(self, interaction: discord.Interaction):
         chosen_title = self.select.values[0]
-        execute_db("UPDATE users SET special_title = ? WHERE user_id = ?", (chosen_title, interaction.user.id), commit=True)
+        users_collection.update_one({"_id": interaction.user.id}, {"$set": {"special_title": chosen_title}})
         await interaction.response.send_message(f"✅ Титул изменен на: **{chosen_title}**!", ephemeral=True)
 
 @bot.tree.command(name="settitle", description="Выбрать активный титул")
 async def settitle(interaction: discord.Interaction):
-    rows = execute_db("SELECT title_name FROM user_titles WHERE user_id = ?", (interaction.user.id,), fetchall=True)
+    rows = list(titles_collection.find({"user_id": interaction.user.id}))
     if not rows:
         return await interaction.response.send_message("❌ У вас нет купленных титулов!", ephemeral=True)
-    titles = [r[0] for r in rows]
+    titles = [r["title_name"] for r in rows]
     await interaction.response.send_message(embed=discord.Embed(title="[ 👑 ВЫБОР ТИТУЛА ]", color=0xFFD700), view=SetTitleSelect(titles), ephemeral=True)
 
 # --- АУКЦИОН РОЛЕЙ ---
@@ -805,7 +743,18 @@ class SellRoleModal(discord.ui.Modal, title="Выставить роль на а
 
         if price <= 0: return await interaction.response.send_message("❌ Цена > 0!", ephemeral=True)
 
-        execute_db("INSERT INTO auction_roles (role_id, seller_id, price, role_name) VALUES (?, ?, ?, ?)", (self.role_id, interaction.user.id, price, self.role_name), commit=True)
+        # Генерируем уникальный sale_id как автоинкремент через поиск максимального
+        last_item = auction_collection.find_one(sort=[("sale_id", -1)])
+        next_sale_id = (last_item["sale_id"] + 1) if last_item and "sale_id" in last_item else 1
+
+        auction_collection.insert_one({
+            "sale_id": next_sale_id,
+            "role_id": self.role_id,
+            "seller_id": interaction.user.id,
+            "price": price,
+            "role_name": self.role_name
+        })
+
         role = interaction.guild.get_role(self.role_id)
         if role: 
             try: await interaction.user.remove_roles(role)
@@ -829,26 +778,26 @@ class SellRoleSelect(discord.ui.View):
 class BuyAuctionSelect(discord.ui.View):
     def __init__(self, items_list):
         super().__init__(timeout=60)
-        options = [discord.SelectOption(label=role_name, description=f"Цена: {price:,} | Продавец: ID {seller_id}", value=str(sale_id)) for sale_id, role_id, seller_id, price, role_name in items_list]
+        options = [discord.SelectOption(label=item["role_name"], description=f"Цена: {item['price']:,} | Продавец: ID {item['seller_id']}", value=str(item["sale_id"])) for item in items_list]
         self.select = discord.ui.Select(placeholder="Выберите роль для покупки...", options=options)
         self.select.callback = self.select_callback
         self.add_item(self.select)
 
     async def select_callback(self, interaction: discord.Interaction):
         sale_id = int(self.select.values[0])
-        item = execute_db("SELECT role_id, seller_id, price, role_name FROM auction_roles WHERE sale_id = ?", (sale_id,), fetchone=True)
+        item = auction_collection.find_one({"sale_id": sale_id})
         if not item: return await interaction.response.send_message("❌ Лот уже продан!", ephemeral=True)
 
-        role_id, seller_id, price, role_name = item
+        role_id, seller_id, price, role_name = item["role_id"], item["seller_id"], item["price"], item["role_name"]
         if interaction.user.id == seller_id: return await interaction.response.send_message("❌ Нельзя покупать свое!", ephemeral=True)
 
         buyer_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
         if buyer_coins < price: return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
 
-        execute_db("UPDATE users SET coins = coins - ? WHERE user_id = ?", (price, interaction.user.id), commit=True)
-        execute_db("UPDATE users SET coins = coins + ? WHERE user_id = ?", (price, seller_id), commit=True)
-        execute_db("UPDATE custom_roles SET user_id = ? WHERE role_id = ?", (interaction.user.id, role_id), commit=True)
-        execute_db("DELETE FROM auction_roles WHERE sale_id = ?", (sale_id,), commit=True)
+        users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -price}})
+        users_collection.update_one({"_id": seller_id}, {"$inc": {"coins": price}})
+        custom_roles_collection.update_one({"role_id": role_id}, {"$set": {"user_id": interaction.user.id}})
+        auction_collection.delete_one({"sale_id": sale_id})
 
         role = interaction.guild.get_role(role_id)
         if role:
@@ -865,22 +814,22 @@ class BuyAuctionSelect(discord.ui.View):
 async def auction(interaction: discord.Interaction, action: str):
     uid = interaction.user.id
     if action == "list":
-        items = execute_db("SELECT sale_id, role_id, seller_id, price, role_name FROM auction_roles", fetchall=True)
+        items = list(auction_collection.find())
         if not items: return await interaction.response.send_message("📦 На аукционе пусто.", ephemeral=True)
         embed = discord.Embed(title="[ 🏛️ АУКЦИОН РОЛЕЙ ]", color=0xFFD700)
         await interaction.response.send_message(embed=embed, view=BuyAuctionSelect(items), ephemeral=True)
     elif action == "sell":
-        rows = execute_db("SELECT role_id FROM custom_roles WHERE user_id = ?", (uid,), fetchall=True)
+        rows = list(custom_roles_collection.find({"user_id": uid}))
         if not rows: return await interaction.response.send_message("❌ У вас нет кастомных ролей!", ephemeral=True)
-        user_roles = [interaction.guild.get_role(r[0]) for r in rows if interaction.guild.get_role(r[0])]
+        user_roles = [interaction.guild.get_role(r["role_id"]) for r in rows if interaction.guild.get_role(r["role_id"])]
         if not user_roles: return await interaction.response.send_message("❌ Роли не найдены.", ephemeral=True)
         await interaction.response.send_message(embed=discord.Embed(title="[ 🏷️ ПРОДАЖА РОЛИ ]", color=0x2ECC71), view=SellRoleSelect(user_roles), ephemeral=True)
 
 @bot.tree.command(name="leaderboard", description="Топ-10 игроков")
 async def leaderboard(interaction: discord.Interaction):
-  top = execute_db("SELECT user_id, level, coins FROM users ORDER BY level DESC, coins DESC LIMIT 10", fetchall=True)
+  top = list(users_collection.find().sort([("level", -1), ("coins", -1)]).limit(10))
   embed = discord.Embed(title="[ 🏆 ТОП-10 ИГРОКОВ АЙНКРАДА ]", color=0xFFD700)
-  embed.description = "\n".join([f"`#{i}` <@{uid}> — **{lvl} этаж** | {cns:,} <:col:1530575386457542817>" for i, (uid, lvl, cns) in enumerate(top, 1)]) if top else "Пусто"
+  embed.description = "\n".join([f"`#{i}` <@{u['_id']}> — **{u.get('level', 1)} этаж** | {u.get('coins', 0):,} <:col:1530575386457542817>" for i, u in enumerate(top, 1)]) if top else "Пусто"
   await interaction.response.send_message(embed=embed)
 
 # --- АДМИНСКИЕ КОМАНДЫ ---
@@ -889,7 +838,7 @@ async def leaderboard(interaction: discord.Interaction):
 @app_commands.default_permissions(administrator=True)
 async def setlevel(interaction: discord.Interaction, member: discord.Member, level: int):
   get_or_create_user(member.id)
-  execute_db("UPDATE users SET level = ?, xp = 0 WHERE user_id = ?", (level, member.id), commit=True)
+  users_collection.update_one({"_id": member.id}, {"$set": {"level": level, "xp": 0}})
   await check_level_roles(member, level)
   await interaction.response.send_message(f"✅ Установлен {level} этаж для {member.mention}.", ephemeral=True)
 
@@ -897,18 +846,18 @@ async def setlevel(interaction: discord.Interaction, member: discord.Member, lev
 @app_commands.default_permissions(administrator=True)
 async def givecoins(interaction: discord.Interaction, member: discord.Member, amount: int):
   get_or_create_user(member.id)
-  execute_db("UPDATE users SET coins = coins + ? WHERE user_id = ?", (amount, member.id), commit=True)
+  users_collection.update_one({"_id": member.id}, {"$inc": {"coins": amount}})
   await interaction.response.send_message(f"✅ Выдано {amount:,} Колов {member.mention}.", ephemeral=True)
 
 @bot.tree.command(name="resetdb", description="[АДМИН] Очистить базу данных")
 @app_commands.default_permissions(administrator=True)
 async def resetdb(interaction: discord.Interaction):
-  execute_db("DROP TABLE IF EXISTS users", commit=True)
-  execute_db("DROP TABLE IF EXISTS guilds", commit=True)
-  execute_db("DROP TABLE IF EXISTS custom_roles", commit=True)
-  execute_db("DROP TABLE IF EXISTS user_titles", commit=True)
-  init_db()
-  await interaction.response.send_message("☢️ База очищена!", ephemeral=True)
+  users_collection.delete_many({})
+  guilds_collection.delete_many({})
+  custom_roles_collection.delete_many({})
+  titles_collection.delete_many({})
+  auction_collection.delete_many({})
+  await interaction.response.send_message("☢️ Облачная база данных полностью очищена!", ephemeral=True)
 
 keep_alive()
 bot.run(os.getenv("TOKEN"))
