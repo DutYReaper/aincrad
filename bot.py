@@ -1,12 +1,25 @@
-import sqlite3
 import os
 import random
 import time
 import asyncio
 import discord
+from pymongo import MongoClient
 from discord import app_commands
 from discord.ext import commands
 from keep_alive import keep_alive
+
+# Достаем ту самую ссылку, которую мы спрятали на Render
+MONGO_URI = os.getenv('MONGO_URI')
+
+# Подключаемся к нашему облачному кластеру
+cluster = MongoClient(MONGO_URI)
+
+# Создаем саму базу данных 
+db = cluster.aincrad_data
+
+# Создаем коллекцию (это как таблица, где будут лежать профили участников)
+# MongoDB работает с данными точно так же, как классические словари (dict) в Python, поэтому поиск и базовые алгоритмы будут работать очень быстро.
+users_collection = db.users
 
 intents = discord.Intents.default()
 intents.message_content = True
