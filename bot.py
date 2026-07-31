@@ -1087,30 +1087,40 @@ class IdeaModal(discord.ui.Modal, title="Предложить идею для с
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        # ВАЖНО: Замени цифры ниже на ID твоего канала ╰💡・идеи
+        # ВАЖНО: Твой ID канала идей
         idea_channel_id = 1532592402223730739  
         channel = interaction.guild.get_channel(idea_channel_id)
 
         if not channel:
-            return await interaction.response.send_message("❌ Ошибка: Канал для идей не найден. Проверьте ID в коде!", ephemeral=True)
+            return await interaction.response.send_message("❌ Ошибка: Канал для идей не найден.", ephemeral=True)
 
+        # Достаем инфу об игроке, чтобы красиво показать его этаж (в стиле SAO)
+        _, _, level, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+
+        # Оформляем эмбед в стиле интерфейса SAO
         embed = discord.Embed(
-            title="💡 Новое предложение", 
-            description=self.idea_text.value, 
-            color=0xF1C40F
+            title="[ 🌐 ПРЕДЛОЖЕНИЕ СИСТЕМЕ АЙНКРАДА ]", 
+            description=f"**Суть инициативы:**\n{self.idea_text.value}", 
+            color=0x00BFFF  # Фирменный цвет меню SAO
         )
-        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-        embed.set_footer(text="Aincrad Ideas • Голосуйте реакциями ниже!")
+        
+        # Вот эта строчка делает аватарку БОЛЬШОЙ сбоку (справа)
+        embed.set_thumbnail(url=interaction.user.display_avatar.url)
+        
+        # Добавляем атмосферные поля информации
+        embed.add_field(name="👤 Инициатор", value=interaction.user.mention, inline=True)
+        embed.add_field(name="⚔️ Этаж", value=f"**{level}**", inline=True)
+        
+        embed.set_footer(text="Cardinal System • Голосуйте за расширение мира (👍 / 👎)")
 
-        # Бот отправляет красиво оформленную идею
+        # Отправляем идею
         msg = await channel.send(embed=embed)
         
-        # Бот автоматически ставит реакции для голосования
+        # Ставим реакции
         await msg.add_reaction("👍")
         await msg.add_reaction("👎")
 
-        await interaction.response.send_message("✅ Ваша идея успешно отправлена на голосование!", ephemeral=True)
-
+        await interaction.response.send_message("✅ Ваша идея успешно отправлена на рассмотрение в систему Cardinal!", ephemeral=True)
 
 @bot.tree.command(name="idea", description="Предложить новую идею для развития сервера")
 async def idea(interaction: discord.Interaction):
