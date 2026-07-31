@@ -172,8 +172,10 @@ async def on_message(message):
 # --- АДМИНСКАЯ КОМАНДА ТЕХОБСЛУЖИВАНИЯ ---
 
 @bot.tree.command(name="maintenance", description="[АДМИН] Включить/выключить режим техобслуживания")
-@app_commands.default_permissions(administrator=True)
 async def maintenance(interaction: discord.Interaction):
+    if not is_admin_or_mod(interaction.user):
+        return await interaction.response.send_message("❌ У вас нет прав для этой команды!", ephemeral=True)
+        
     global MAINTENANCE_MODE
     MAINTENANCE_MODE = not MAINTENANCE_MODE
     status = "🔴 ВКЛЮЧЕН (доступ закрыт для игроков)" if MAINTENANCE_MODE else "🟢 ВЫКЛЮЧЕН (бот работает)"
@@ -368,6 +370,49 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
     
 # --- АЗАРТНЫЕ ИГРЫ ---
 
+@bot.tree.command(name="duel", description="Вызвать игрока на дуэль (Мин. ставка: 50)")
+async def duel(interaction: discord.Interaction, target: discord.Member, amount: int):
+    if target.id == interaction.user.id:
+        return await interaction.response.send_message("❌ Вы не можете вызвать на дуэль самого себя!", ephemeral=True)
+    if target.bot:
+        return await interaction.response.send_message("❌ С ботами драться неинтересно.", ephemeral=True)
+    if amount < 50:
+        return await interaction.response.send_message("❌ Минимальная ставка — **50 Колов**!", ephemeral=True)
+
+    my_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    target_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(target.id)
+
+    if my_coins < amount:
+        return await interaction.response.send_message("❌ У вас недостаточно средств для такой ставки!", ephemeral=True)
+    if target_coins < amount:
+        return await interaction.response.send_message(f"❌ У {target.mention} недостаточно средств для принятия дуэли!", ephemeral=True)
+
+    # Гифка Кирито из фильма SAO
+    gif_url = "https://media.tenor.com/fA7mD8B8O0QAAAAC/sword-art-online-kirito.gif"
+
+    embed_loading = discord.Embed(
+        title="[ ⚔️ ДУЭЛЬ ]", 
+        description=f"{interaction.user.mention} и {target.mention} скрестили клинки на **{amount:,}** Колов...", 
+        color=0xE67E22
+    )
+    embed_loading.set_image(url=gif_url)
+    
+    await interaction.response.send_message(embed=embed_loading)
+    await asyncio.sleep(3.0)
+
+    winner = random.choice([interaction.user, target])
+    loser = target if winner == interaction.user else interaction.user
+
+    users_collection.update_one({"_id": winner.id}, {"$inc": {"coins": amount}})
+    users_collection.update_one({"_id": loser.id}, {"$inc": {"coins": -amount}})
+
+    # Финальный результат БЕЗ гифки
+    embed_res = discord.Embed(title="[ ⚔️ ИТОГ ДУЭЛИ ]", color=0x3498DB)
+    embed_res.description = f"🏆 Победитель: {winner.mention}!\nОн наносит решающий удар и забирает **{amount:,}** Колов у {loser.mention}."
+
+    await interaction.edit_original_response(embed=embed_res)
+    await add_xp(interaction, winner.id, random.randint(10, 20))
+    
 @bot.tree.command(name="dice", description="Бросить кости против системы (Мин. ставка: 50)")
 async def dice(interaction: discord.Interaction, amount: int):
   if not is_admin_or_mod(interaction.user) and amount < 50:
@@ -1075,46 +1120,110 @@ async def resetdb(interaction: discord.Interaction):
   auction_collection.delete_many({})
   await interaction.response.send_message("☢️ Облачная база данных полностью очищена!", ephemeral=True)
 
-# --- СИСТЕМА ИДЕЙ И ПРЕДЛОЖЕНИЙ ---
+# --- СИСТЕМА ИДЕЙ И ПРЕДЛОЖЕНИЙ (С ПРЕМОДЕРАЦИЕЙ) ---
+
+# ВАЖНО: Вставь сюда ID твоих каналов!
+PUBLIC_IDEA_CHANNEL_ID = 1532592402223730739  # ID публичного канала (╰💡・идеи)
+ADMIN_IDEA_CHANNEL_ID = 1532719050319466610    # ID админского канала (╰ ⚖️ ・ проверка-идей)
+
+class AdminIdeaView(discord.ui.View):
+    def __init__(self, author: discord.Member, idea_text: str):
+        super().__init__(timeout=None)
+        self.author = author
+        self.idea_text = idea_text
+
+    @discord.ui.button(label="Одобрить", style=discord.ButtonStyle.green, emoji="✅")
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin_or_mod(interaction.user):
+            return await interaction.response.send_message("❌ У вас нет прав для проверки идей!", ephemeral=True)
+            
+        public_channel = interaction.guild.get_channel(PUBLIC_IDEA_CHANNEL_ID)
+        if not public_channel:
+            return await interaction.response.send_message("❌ Ошибка: Публичный канал идей не найден.", ephemeral=True)
+
+        # 1. Отправляем в публичный канал в чистом минималистичном стиле
+        public_embed = discord.Embed(
+            description=f"**Идея:**\n{self.idea_text}\n\n**Прислал:**\n{self.author.mention}",
+            color=0x2B2D31 # Сливается с фоном Discord
+        )
+        public_embed.set_thumbnail(url=self.author.display_avatar.url)
+        
+        msg = await public_channel.send(embed=public_embed)
+        await msg.add_reaction("👍")
+        await msg.add_reaction("👎")
+        
+        # 2. Обновляем сообщение в админ-канале (выключаем кнопки)
+        admin_embed = interaction.message.embeds[0]
+        admin_embed.color = 0x2ECC71
+        admin_embed.title = "✅ ИДЕЯ ОДОБРЕНА И ОПУБЛИКОВАНА"
+        admin_embed.add_field(name="Проверил модератор:", value=interaction.user.mention, inline=False)
+        
+        for child in self.children:
+            child.disabled = True
+            
+        await interaction.response.edit_message(embed=admin_embed, view=self)
+        
+        # 3. Уведомляем автора в ЛС (если у него открыты сообщения)
+        try:
+            await self.author.send(f"✅ Ваша идея была одобрена модератором и опубликована в канале идей!")
+        except Exception:
+            pass
+
+    @discord.ui.button(label="Отклонить", style=discord.ButtonStyle.red, emoji="❌")
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin_or_mod(interaction.user):
+            return await interaction.response.send_message("❌ У вас нет прав для проверки идей!", ephemeral=True)
+            
+        # Обновляем сообщение в админ-канале
+        admin_embed = interaction.message.embeds[0]
+        admin_embed.color = 0xE74C3C
+        admin_embed.title = "❌ ИДЕЯ ОТКЛОНЕНА"
+        admin_embed.add_field(name="Отклонил модератор:", value=interaction.user.mention, inline=False)
+        
+        for child in self.children:
+            child.disabled = True
+            
+        await interaction.response.edit_message(embed=admin_embed, view=self)
+        
+        # Уведомляем автора
+        try:
+            await self.author.send(f"❌ Ваша идея была отклонена модерацией. Пожалуйста, предлагайте только адекватные и продуманные вещи.")
+        except Exception:
+            pass
+
 
 class IdeaModal(discord.ui.Modal, title="Предложить идею для сервера"):
     idea_text = discord.ui.TextInput(
         label="Суть вашей идеи",
         style=discord.TextStyle.paragraph,
-        placeholder="Я предлагаю добавить...",
+        placeholder="Я предлагаю добавить/изменить...",
         required=True,
         max_length=1000
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        # ВАЖНО: Твой ID канала идей
-        idea_channel_id = 1532592402223730739  
-        channel = interaction.guild.get_channel(idea_channel_id)
+        admin_channel = interaction.guild.get_channel(ADMIN_IDEA_CHANNEL_ID)
 
-        if not channel:
-            return await interaction.response.send_message("❌ Ошибка: Канал для идей не найден.", ephemeral=True)
+        if not admin_channel:
+            return await interaction.response.send_message("❌ Ошибка: Канал проверки идей не найден. Проверьте ID!", ephemeral=True)
 
-        # Максимально чистый и строгий дизайн
+        # Формируем сообщение для модераторов
         embed = discord.Embed(
-            description=f"**Идея:**\n{self.idea_text.value}\n\n**Прислал:**\n{interaction.user.mention}",
-            color=0x2B2D31  # Невидимый цвет (сливается с фоном темной темы Discord)
+            title="⏳ Новая идея на проверку", 
+            description=f"**От пользователя:** {interaction.user.mention}\n\n**Текст:**\n{self.idea_text.value}", 
+            color=0xF1C40F
         )
-        
-        # Аватарка автора справа
         embed.set_thumbnail(url=interaction.user.display_avatar.url)
 
-        # Отправляем идею
-        msg = await channel.send(embed=embed)
-        
-        # Ставим реакции
-        await msg.add_reaction("👍")
-        await msg.add_reaction("👎")
+        # Отправляем в закрытый канал с кнопками
+        view = AdminIdeaView(author=interaction.user, idea_text=self.idea_text.value)
+        await admin_channel.send(embed=embed, view=view)
 
-        await interaction.response.send_message("✅ Ваша идея успешно опубликована!", ephemeral=True)
+        await interaction.response.send_message("✅ Ваша идея успешно отправлена на проверку модераторам. Если она пройдет отбор, то скоро появится в общем канале!", ephemeral=True)
+
 
 @bot.tree.command(name="idea", description="Предложить новую идею для развития сервера")
 async def idea(interaction: discord.Interaction):
-    # Открываем всплывающее окно для ввода идеи
     await interaction.response.send_modal(IdeaModal())
 
 keep_alive()
