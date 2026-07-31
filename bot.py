@@ -1075,5 +1075,47 @@ async def resetdb(interaction: discord.Interaction):
   auction_collection.delete_many({})
   await interaction.response.send_message("☢️ Облачная база данных полностью очищена!", ephemeral=True)
 
+# --- СИСТЕМА ИДЕЙ И ПРЕДЛОЖЕНИЙ ---
+
+class IdeaModal(discord.ui.Modal, title="Предложить идею для сервера"):
+    idea_text = discord.ui.TextInput(
+        label="Суть вашей идеи",
+        style=discord.TextStyle.paragraph,
+        placeholder="Я предлагаю добавить...",
+        required=True,
+        max_length=1000
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # ВАЖНО: Замени цифры ниже на ID твоего канала ╰💡・идеи
+        idea_channel_id = 1532592402223730739  
+        channel = interaction.guild.get_channel(idea_channel_id)
+
+        if not channel:
+            return await interaction.response.send_message("❌ Ошибка: Канал для идей не найден. Проверьте ID в коде!", ephemeral=True)
+
+        embed = discord.Embed(
+            title="💡 Новое предложение", 
+            description=self.idea_text.value, 
+            color=0xF1C40F
+        )
+        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        embed.set_footer(text="Aincrad Ideas • Голосуйте реакциями ниже!")
+
+        # Бот отправляет красиво оформленную идею
+        msg = await channel.send(embed=embed)
+        
+        # Бот автоматически ставит реакции для голосования
+        await msg.add_reaction("👍")
+        await msg.add_reaction("👎")
+
+        await interaction.response.send_message("✅ Ваша идея успешно отправлена на голосование!", ephemeral=True)
+
+
+@bot.tree.command(name="idea", description="Предложить новую идею для развития сервера")
+async def idea(interaction: discord.Interaction):
+    # Открываем всплывающее окно для ввода идеи
+    await interaction.response.send_modal(IdeaModal())
+
 keep_alive()
 bot.run(os.getenv("TOKEN"))
