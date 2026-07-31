@@ -1094,24 +1094,14 @@ class IdeaModal(discord.ui.Modal, title="Предложить идею для с
         if not channel:
             return await interaction.response.send_message("❌ Ошибка: Канал для идей не найден.", ephemeral=True)
 
-        # Достаем инфу об игроке, чтобы красиво показать его этаж (в стиле SAO)
-        _, _, level, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
-
-        # Оформляем эмбед в стиле интерфейса SAO
+        # Максимально чистый и строгий дизайн
         embed = discord.Embed(
-            title="[ 🌐 ПРЕДЛОЖЕНИЕ СИСТЕМЕ АЙНКРАДА ]", 
-            description=f"**Суть инициативы:**\n{self.idea_text.value}", 
-            color=0x00BFFF  # Фирменный цвет меню SAO
+            description=f"**Идея:**\n{self.idea_text.value}\n\n**Прислал:**\n{interaction.user.mention}",
+            color=0x2B2D31  # Невидимый цвет (сливается с фоном темной темы Discord)
         )
         
-        # Вот эта строчка делает аватарку БОЛЬШОЙ сбоку (справа)
+        # Аватарка автора справа
         embed.set_thumbnail(url=interaction.user.display_avatar.url)
-        
-        # Добавляем атмосферные поля информации
-        embed.add_field(name="👤 Инициатор", value=interaction.user.mention, inline=True)
-        embed.add_field(name="⚔️ Этаж", value=f"**{level}**", inline=True)
-        
-        embed.set_footer(text="Cardinal System • Голосуйте за расширение мира (👍 / 👎)")
 
         # Отправляем идею
         msg = await channel.send(embed=embed)
@@ -1120,7 +1110,7 @@ class IdeaModal(discord.ui.Modal, title="Предложить идею для с
         await msg.add_reaction("👍")
         await msg.add_reaction("👎")
 
-        await interaction.response.send_message("✅ Ваша идея успешно отправлена на рассмотрение в систему Cardinal!", ephemeral=True)
+        await interaction.response.send_message("✅ Ваша идея успешно опубликована!", ephemeral=True)
 
 @bot.tree.command(name="idea", description="Предложить новую идею для развития сервера")
 async def idea(interaction: discord.Interaction):
