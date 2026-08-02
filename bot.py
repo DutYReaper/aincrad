@@ -1327,7 +1327,7 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
 @bot.event
 async def on_member_join(member: discord.Member):
     # Ищем роль по ее точному названию (можешь заменить "User" на ту, которая тебе нужна)
-    role = discord.utils.get(member.guild.roles, name="Юзер") 
+    role = discord.utils.get(member.guild.roles, name="unverify") 
     if role:
         try:
             await member.add_roles(role)
