@@ -1291,8 +1291,8 @@ async def setup_verify(interaction: discord.Interaction):
 
 @bot.tree.command(name="verify", description="[САППОРТ] Пройти проверку пользователя и выдать гендерную роль")
 @app_commands.choices(gender=[
-    app_commands.Choice(name="Мужчина ♂️", value="Мужчина"),
-    app_commands.Choice(name="Женщина ♀️", value="Женщина")
+    app_commands.Choice(name="Мужчина ♂️", value="♂️"),
+    app_commands.Choice(name="Женщина ♀️", value="♀️")
 ])
 async def verify_user(interaction: discord.Interaction, member: discord.Member, gender: str):
     # Если нужно, можешь добавить проверку на конкретную роль "Саппорт" в функцию is_admin_or_mod
