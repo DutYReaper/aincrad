@@ -1309,7 +1309,7 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
         
         # Если у вас есть стартовая роль, которая ограничивала права, бот ее снимет. 
         # (Обязательно создай роль "Неверифицированный" на сервере, если хочешь чтобы это работало)
-        unverified_role = discord.utils.get(interaction.guild.roles, name="Неверифицированный")
+        unverified_role = discord.utils.get(interaction.guild.roles, name="unverify")
         if unverified_role and unverified_role in member.roles:
             await member.remove_roles(unverified_role)
             
