@@ -1263,5 +1263,66 @@ class IdeaModal(discord.ui.Modal, title="Предложить идею для с
 async def idea(interaction: discord.Interaction):
     await interaction.response.send_modal(IdeaModal())
 
+# --- СИСТЕМА ВЕРИФИКАЦИИ (РУЧНАЯ ПРОВЕРКА В ГОЛОСЕ) ---
+
+@bot.tree.command(name="setup_verify", description="[АДМИН] Установить сообщение с инструкцией по верификации")
+async def setup_verify(interaction: discord.Interaction):
+    if not is_admin_or_mod(interaction.user): 
+        return await interaction.response.send_message("❌ У вас нет прав для этой команды.", ephemeral=True)
+    
+    embed = discord.Embed(
+        title="🛡️ СИСТЕМА ИДЕНТИФИКАЦИИ ИГРОКОВ", 
+        description=(
+            "Добро пожаловать в Айнкрад!\n\n"
+            "Чтобы получить доступ к этажам сервера и начать игру, вам необходимо пройти быструю голосовую проверку.\n\n"
+            "**Как получить доступ?**\n"
+            "1️⃣ Зайдите в голосовой канал **🔊 Ожидание верификации**.\n"
+            "2️⃣ Дождитесь свободного Саппорта или Модератора.\n"
+            "3️⃣ Вас перекинут в закрытый канал для короткой проверки.\n"
+            "4️⃣ После подтверждения вам выдадут гендерную роль и полный доступ к серверу."
+        ), 
+        color=0x3498DB
+    )
+    embed.set_image(url="https://i.pinimg.com/originals/44/ee/12/44ee12a9754f7a26f8eb7ba48de30c6a.gif")
+    embed.set_footer(text="Aincrad Security System • Ручная проверка Кардинала")
+    
+    await interaction.channel.send(embed=embed)
+    await interaction.response.send_message("✅ Инструкция по голосовой верификации успешно установлена.", ephemeral=True)
+
+@bot.tree.command(name="verify", description="[САППОРТ] Пройти проверку пользователя и выдать гендерную роль")
+@app_commands.choices(gender=[
+    app_commands.Choice(name="Мужчина ♂️", value="Мужчина"),
+    app_commands.Choice(name="Женщина ♀️", value="Женщина")
+])
+async def verify_user(interaction: discord.Interaction, member: discord.Member, gender: str):
+    # Если нужно, можешь добавить проверку на конкретную роль "Саппорт" в функцию is_admin_or_mod
+    if not is_admin_or_mod(interaction.user): 
+        return await interaction.response.send_message("❌ У вас нет прав саппорта для верификации игроков!", ephemeral=True)
+        
+    role = discord.utils.get(interaction.guild.roles, name=gender)
+    if not role:
+        return await interaction.response.send_message(f"❌ Системная ошибка: Роль «{gender}» не найдена на сервере.", ephemeral=True)
+        
+    try:
+        # Выдаем гендерную роль
+        await member.add_roles(role)
+        
+        # Если у вас есть стартовая роль, которая ограничивала права, бот ее снимет. 
+        # (Обязательно создай роль "Неверифицированный" на сервере, если хочешь чтобы это работало)
+        unverified_role = discord.utils.get(interaction.guild.roles, name="Неверифицированный")
+        if unverified_role and unverified_role in member.roles:
+            await member.remove_roles(unverified_role)
+            
+        embed = discord.Embed(
+            title="✅ ВЕРИФИКАЦИЯ УСПЕШНА", 
+            description=f"Игрок {member.mention} прошел голосовую проверку у саппорта {interaction.user.mention} и получил статус **{gender}**.\n\nДобро пожаловать в Айнкрад!", 
+            color=0x2ECC71
+        )
+        embed.set_thumbnail(url=member.display_avatar.url)
+        await interaction.response.send_message(embed=embed)
+        
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Ошибка доступа: бот не может выдать роль (возможно роль бота ниже роли, которую он пытается выдать). Подробности: {e}", ephemeral=True)
+
 keep_alive()
 bot.run(os.getenv("TOKEN"))
