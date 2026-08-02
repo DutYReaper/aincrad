@@ -1323,6 +1323,17 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
         
     except Exception as e:
         await interaction.response.send_message(f"❌ Ошибка доступа: бот не может выдать роль (возможно роль бота ниже роли, которую он пытается выдать). Подробности: {e}", ephemeral=True)
+        
+@bot.event
+async def on_member_join(member: discord.Member):
+    # Ищем роль по ее точному названию (можешь заменить "User" на ту, которая тебе нужна)
+    role = discord.utils.get(member.guild.roles, name="Юзер") 
+    if role:
+        try:
+            await member.add_roles(role)
+            print(f"[СИСТЕМА] Автоматически выдана роль {role.name} новому участнику {member.name}")
+        except Exception as e:
+            print(f"[ОШИБКА] Не удалось выдать роль новичку: {e}")
 
 keep_alive()
 bot.run(os.getenv("TOKEN"))
