@@ -9,7 +9,7 @@ from discord import app_commands
 from discord.ext import commands
 from keep_alive import keep_alive
 
-# Достаем ссылку на базу из переменных окружения Render
+# Достаем ссылку на базу из переменных окружения
 MONGO_URI = os.getenv('MONGO_URI')
 
 # Подключаемся с поддержкой сертификатов certifi
@@ -72,7 +72,9 @@ def is_admin_or_mod(member: discord.Member):
     if member.guild_permissions.administrator:
         return True
     role_names = [r.name.lower() for r in member.roles]
-    if "модератор" in role_names or "администратор" in role_names:
+    # Добавлены все роли администрации Айнкрада
+    allowed_roles = ["модератор", "moderator", "администратор", "administrator", "саппорт", "support", "founder", "co-founder"]
+    if any(role in role_names for role in allowed_roles):
         return True
     return False
 
@@ -162,18 +164,29 @@ async def add_xp(interaction, user_id, amount):
 
 @bot.event
 async def on_ready():
-  await bot.tree.sync()
-  print(f"Бот {bot.user} запущен и полностью готов к работе в Айнкраде!")
+    await bot.tree.sync()
+    print(f"Бот {bot.user} запущен и полностью готов к работе в Айнкраде!")
 
 @bot.event
 async def on_message(message):
-  if message.author.bot or not message.guild:
-    return
-  global MAINTENANCE_MODE
-  if MAINTENANCE_MODE and not is_admin_or_mod(message.author):
-      return
-  await add_xp(message, message.author.id, random.randint(2, 5))
-  await bot.process_commands(message)
+    if message.author.bot or not message.guild:
+        return
+    global MAINTENANCE_MODE
+    if MAINTENANCE_MODE and not is_admin_or_mod(message.author):
+        return
+    await add_xp(message, message.author.id, random.randint(2, 5))
+    await bot.process_commands(message)
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    # Автоматически выдаем роль unverify при входе нового участника
+    role = discord.utils.get(member.guild.roles, name="unverify") 
+    if role:
+        try:
+            await member.add_roles(role)
+            print(f"[СИСТЕМА] Автоматически выдана роль {role.name} новому участнику {member.name}")
+        except Exception as e:
+            print(f"[ОШИБКА] Не удалось выдать роль новичку: {e}")
 
 # --- АДМИНСКАЯ КОМАНДА ТЕХОБСЛУЖИВАНИЯ ---
 
@@ -193,140 +206,140 @@ async def maintenance(interaction: discord.Interaction):
 @bot.tree.command(name="balance", description="Посмотреть текущий баланс Колов")
 @check_maintenance()
 async def balance(interaction: discord.Interaction, member: discord.Member = None):
-  target = member or interaction.user
-  coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(target.id)
-  embed = discord.Embed(title="🌐 БАНКОВСКИЙ СЧЕТ АЙНКРАДА", color=0x00BFFF)
-  embed.set_thumbnail(url=target.display_avatar.url)
-  embed.add_field(name="💳 Владелец счета", value=f"{target.mention}", inline=False)
-  embed.add_field(name="💰 Доступный баланс", value=f"```fix\n{coins:,} Колов\n```", inline=False)
-  embed.set_footer(text="Aincrad Central Bank • Надежное хранение капитала")
-  await interaction.response.send_message(embed=embed)
+    target = member or interaction.user
+    coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(target.id)
+    embed = discord.Embed(title="🌐 БАНКОВСКИЙ СЧЕТ АЙНКРАДА", color=0x00BFFF)
+    embed.set_thumbnail(url=target.display_avatar.url)
+    embed.add_field(name="💳 Владелец счета", value=f"{target.mention}", inline=False)
+    embed.add_field(name="💰 Доступный баланс", value=f"```fix\n{coins:,} Колов\n```", inline=False)
+    embed.set_footer(text="Aincrad Central Bank • Надежное хранение капитала")
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="profile", description="Посмотреть подробный игровой профиль")
 @check_maintenance()
 async def profile(interaction: discord.Interaction, member: discord.Member = None):
-  target = member or interaction.user
-  coins, xp, level, _, _, _, _, streak, guild_id, special_title = get_or_create_user(target.id)
-  next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
-  progress = int((xp / next_level_xp) * 10) if next_level_xp > 0 else 0
-  bar = "🟩" * progress + "⬛" * (10 - progress)
+    target = member or interaction.user
+    coins, xp, level, _, _, _, _, streak, guild_id, special_title = get_or_create_user(target.id)
+    next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
+    progress = int((xp / next_level_xp) * 10) if next_level_xp > 0 else 0
+    bar = "🟩" * progress + "⬛" * (10 - progress)
 
-  embed = discord.Embed(title=f"🛡️ ИГРОВОЙ ПРОФИЛЬ: {target.display_name}", color=0xFFD700)
-  embed.set_thumbnail(url=target.display_avatar.url)
-  embed.add_field(name="⚔️ Этаж башни", value=f"```yaml\n{level}\n```", inline=True)
-  embed.add_field(name="🪙 Капитал", value=f"```yaml\n{coins:,} Колов\n```", inline=True)
-  embed.add_field(name="🔥 Стрик входов", value=f"```yaml\n{streak} дн.\n```", inline=True)
-  embed.add_field(name="🏰 Гильдия", value=f"```yaml\n{guild_id if guild_id else 'Нет гильдии'}\n```", inline=False)
-  embed.add_field(name="✨ Активный титул", value=f"```yaml\n{special_title}\n```", inline=False)
-  embed.add_field(name="📊 Прогресс опыта (XP)", value=f"{xp} / {next_level_xp} XP\n{bar}", inline=False)
-  embed.set_footer(text="Aincrad Status Management System")
-  await interaction.response.send_message(embed=embed)
+    embed = discord.Embed(title=f"🛡️ ИГРОВОЙ ПРОФИЛЬ: {target.display_name}", color=0xFFD700)
+    embed.set_thumbnail(url=target.display_avatar.url)
+    embed.add_field(name="⚔️ Этаж башни", value=f"```yaml\n{level}\n```", inline=True)
+    embed.add_field(name="🪙 Капитал", value=f"```yaml\n{coins:,} Колов\n```", inline=True)
+    embed.add_field(name="🔥 Стрик входов", value=f"```yaml\n{streak} дн.\n```", inline=True)
+    embed.add_field(name="🏰 Гильдия", value=f"```yaml\n{guild_id if guild_id else 'Нет гильдии'}\n```", inline=False)
+    embed.add_field(name="✨ Активный титул", value=f"```yaml\n{special_title}\n```", inline=False)
+    embed.add_field(name="📊 Прогресс опыта (XP)", value=f"{xp} / {next_level_xp} XP\n{bar}", inline=False)
+    embed.set_footer(text="Aincrad Status Management System")
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="pay", description="Совершить межбанковский перевод Колов другому игроку")
 @check_maintenance()
 async def pay(interaction: discord.Interaction, member: discord.Member, amount: int):
-  if amount <= 0 or member.id == interaction.user.id:
-    return await interaction.response.send_message("❌ Некорректная операция! Нельзя переводить средства самому себе или указывать нулевую сумму.", ephemeral=True)
-  
-  sender_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
-  if sender_coins < amount:
-    return await interaction.response.send_message("❌ Ошибка перевода: на вашем счете недостаточно средств!", ephemeral=True)
+    if amount <= 0 or member.id == interaction.user.id:
+        return await interaction.response.send_message("❌ Некорректная операция! Нельзя переводить средства самому себе или указывать нулевую сумму.", ephemeral=True)
+    
+    sender_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    if sender_coins < amount:
+        return await interaction.response.send_message("❌ Ошибка перевода: на вашем счете недостаточно средств!", ephemeral=True)
 
-  get_or_create_user(member.id)
-  users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
-  users_collection.update_one({"_id": member.id}, {"$inc": {"coins": amount}})
+    get_or_create_user(member.id)
+    users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
+    users_collection.update_one({"_id": member.id}, {"$inc": {"coins": amount}})
 
-  embed = discord.Embed(title="💸 МЕЖБАНКОВСКИЙ ПЕРЕВОД УСПЕШЕН", color=0x00FF00)
-  embed.description = f"Со счета успешно списано и переведено **{amount:,} Колов** в пользу игрока {member.mention}."
-  embed.set_footer(text="Безопасная транзакция Aincrad Network")
-  await interaction.response.send_message(embed=embed)
+    embed = discord.Embed(title="💸 МЕЖБАНКОВСКИЙ ПЕРЕВОД УСПЕШЕН", color=0x00FF00)
+    embed.description = f"Со счета успешно списано и переведено **{amount:,} Колов** в пользу игрока {member.mention}."
+    embed.set_footer(text="Безопасная транзакция Aincrad Network")
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="daily", description="Получить ежедневную системную награду и поддержать стрик")
 @check_maintenance()
 async def daily(interaction: discord.Interaction):
-  user_id = interaction.user.id
-  current_time = time.time()
-  coins, _, level, last_daily, _, _, _, streak, _, _ = get_or_create_user(user_id)
+    user_id = interaction.user.id
+    current_time = time.time()
+    coins, _, level, last_daily, _, _, _, streak, _, _ = get_or_create_user(user_id)
 
-  if current_time - last_daily < 86400:
-      left = int(86400 - (current_time - last_daily))
-      return await interaction.response.send_message(f"⏳ Системная награда еще не готова. Бонус будет доступен через {left // 3600}ч {(left % 3600) // 60}м!", ephemeral=True)
+    if current_time - last_daily < 86400:
+        left = int(86400 - (current_time - last_daily))
+        return await interaction.response.send_message(f"⏳ Системная награда еще не готова. Бонус будет доступен через {left // 3600}ч {(left % 3600) // 60}м!", ephemeral=True)
 
-  if last_daily > 0 and current_time - last_daily > 172800:
-      streak = 0
+    if last_daily > 0 and current_time - last_daily > 172800:
+        streak = 0
 
-  streak += 1
-  base_coins = 40 + (level * 8)
-  base_xp = 15 + (level * 3)
-  
-  multiplier = 1.0 + (streak * 0.15)
-  reward_coins = int(base_coins * multiplier)
-  reward_xp = int(base_xp * multiplier)
+    streak += 1
+    base_coins = 40 + (level * 8)
+    base_xp = 15 + (level * 3)
+    
+    multiplier = 1.0 + (streak * 0.15)
+    reward_coins = int(base_coins * multiplier)
+    reward_xp = int(base_xp * multiplier)
 
-  users_collection.update_one({"_id": user_id}, {"$inc": {"coins": reward_coins}, "$set": {"streak": streak, "last_daily": current_time}})
-  await add_xp(interaction, user_id, reward_xp)
+    users_collection.update_one({"_id": user_id}, {"$inc": {"coins": reward_coins}, "$set": {"streak": streak, "last_daily": current_time}})
+    await add_xp(interaction, user_id, reward_xp)
 
-  embed = discord.Embed(title="🎁 ЕЖЕДНЕВНАЯ НАГРАДА КАРДИНАЛА", color=0x00FF00)
-  embed.add_field(name="🔥 Серия входов", value=f"```yaml\n{streak} дн.\n```", inline=True)
-  embed.add_field(name="🪙 Получено Колов", value=f"```fix\n+{reward_coins:,}\n```", inline=True)
-  embed.add_field(name="⚡ Получено опыта", value=f"```yaml\n+{reward_xp} XP\n```", inline=True)
-  embed.set_footer(text="Заходите ежедневно для увеличения множителя наград!")
-  await interaction.response.send_message(embed=embed)
+    embed = discord.Embed(title="🎁 ЕЖЕДНЕВНАЯ НАГРАДА КАРДИНАЛА", color=0x00FF00)
+    embed.add_field(name="🔥 Серия входов", value=f"```yaml\n{streak} дн.\n```", inline=True)
+    embed.add_field(name="🪙 Получено Колов", value=f"```fix\n+{reward_coins:,}\n```", inline=True)
+    embed.add_field(name="⚡ Получено опыта", value=f"```yaml\n+{reward_xp} XP\n```", inline=True)
+    embed.set_footer(text="Заходите ежедневно для увеличения множителя наград!")
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="work", description="Отправиться на работу или зачистку ресурсов в Айнкраде")
 @check_maintenance()
 async def work(interaction: discord.Interaction):
-  user_id = interaction.user.id
-  current_time = time.time()
-  _, _, level, _, last_work, _, _, _, _, _ = get_or_create_user(user_id)
+    user_id = interaction.user.id
+    current_time = time.time()
+    _, _, level, _, last_work, _, _, _, _, _ = get_or_create_user(user_id)
 
-  if current_time - last_work < 7200:
-      left = int(7200 - (current_time - last_work))
-      return await interaction.response.send_message(f"⏳ Персонаж устал. Отдых продлится еще {left // 3600}ч {(left % 3600) // 60}м!", ephemeral=True)
+    if current_time - last_work < 7200:
+        left = int(7200 - (current_time - last_work))
+        return await interaction.response.send_message(f"⏳ Персонаж устал. Отдых продлится еще {left // 3600}ч {(left % 3600) // 60}м!", ephemeral=True)
 
-  job_desc = "Зачистка подземелья опасного этажа" if level > 20 else "Сбор ценных ресурсов в безопасной зоне"
-  earned = random.randint(40, 120) + (level * 2)
-  
-  users_collection.update_one({"_id": user_id}, {"$inc": {"coins": earned}, "$set": {"last_work": current_time}})
-  await add_xp(interaction, user_id, random.randint(10, 20))
+    job_desc = "Зачистка подземелья опасного этажа" if level > 20 else "Сбор ценных ресурсов в безопасной зоне"
+    earned = random.randint(40, 120) + (level * 2)
+    
+    users_collection.update_one({"_id": user_id}, {"$inc": {"coins": earned}, "$set": {"last_work": current_time}})
+    await add_xp(interaction, user_id, random.randint(10, 20))
 
-  embed = discord.Embed(title="🛠️ ОТЧЕТ О ВЫПОЛНЕНИИ РАБОТЫ", color=0x3498DB)
-  embed.add_field(name="📋 Задание", value=f"```yaml\n{job_desc} (Этаж {level})\n```", inline=False)
-  embed.add_field(name="💰 Награда зачислена", value=f"```fix\n+{earned} Колов\n```", inline=False)
-  embed.set_footer(text="Гильдия работников Айнкрада")
-  await interaction.response.send_message(embed=embed)
+    embed = discord.Embed(title="🛠️ ОТЧЕТ О ВЫПОЛНЕНИИ РАБОТЫ", color=0x3498DB)
+    embed.add_field(name="📋 Задание", value=f"```yaml\n{job_desc} (Этаж {level})\n```", inline=False)
+    embed.add_field(name="💰 Награда зачислена", value=f"```fix\n+{earned} Колов\n```", inline=False)
+    embed.set_footer(text="Гильдия работников Айнкрада")
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="crime", description="Совершить рискованную и незаконную авантюру на свой страх и риск")
 @check_maintenance()
 async def crime(interaction: discord.Interaction):
-  user_id = interaction.user.id
-  current_time = time.time()
-  coins, _, level, _, _, last_crime, _, _, _, _ = get_or_create_user(user_id)
+    user_id = interaction.user.id
+    current_time = time.time()
+    coins, _, level, _, _, last_crime, _, _, _, _ = get_or_create_user(user_id)
 
-  if current_time - last_crime < 14400:
-      left = int(14400 - (current_time - last_crime))
-      return await interaction.response.send_message(f"⏳ Слишком высокий риск привлекать внимание стражи. Ждите ещё {left // 3600}ч {(left % 3600) // 60}м!", ephemeral=True)
+    if current_time - last_crime < 14400:
+        left = int(14400 - (current_time - last_crime))
+        return await interaction.response.send_message(f"⏳ Слишком высокий риск привлекать внимание стражи. Ждите ещё {left // 3600}ч {(left % 3600) // 60}м!", ephemeral=True)
 
-  success = random.choice([True, False])
-  embed = discord.Embed()
-  if success:
-      reward = random.randint(50, 130) + (level * 2)
-      users_collection.update_one({"_id": user_id}, {"$inc": {"coins": reward}, "$set": {"last_crime": current_time}})
-      await add_xp(interaction, user_id, 15)
-      embed.title = "🥷 КРИМИНАЛЬНЫЙ УСПЕХ"
-      embed.color = 0x2ECC71
-      embed.add_field(name="💼 Результат", value=f"```fix\n+{reward} Колов\n```", inline=False)
-      embed.description = "Авантюра удалась! Вы провернули темное дело и ушли от преследования."
-  else:
-      fine = random.randint(30, 70)
-      new_coins = max(0, coins - fine)
-      users_collection.update_one({"_id": user_id}, {"$set": {"coins": new_coins, "last_crime": current_time}})
-      embed.title = "❌ ПОЙМАН СТРАЖЕЙ ПОРЯДКА"
-      embed.color = 0xE74C3C
-      embed.add_field(name="⚖️ Штраф", value=f"```diff\n-{fine} Колов\n```", inline=False)
-      embed.description = "Вас застигли на месте преступления! Элитная стража выписала штраф."
-  embed.set_footer(text="Криминальный мир нижних уровней")
-  await interaction.response.send_message(embed=embed)
+    success = random.choice([True, False])
+    embed = discord.Embed()
+    if success:
+        reward = random.randint(50, 130) + (level * 2)
+        users_collection.update_one({"_id": user_id}, {"$inc": {"coins": reward}, "$set": {"last_crime": current_time}})
+        await add_xp(interaction, user_id, 15)
+        embed.title = "🥷 КРИМИНАЛЬНЫЙ УСПЕХ"
+        embed.color = 0x2ECC71
+        embed.add_field(name="💼 Результат", value=f"```fix\n+{reward} Колов\n```", inline=False)
+        embed.description = "Авантюра удалась! Вы провернули темное дело и ушли от преследования."
+    else:
+        fine = random.randint(30, 70)
+        new_coins = max(0, coins - fine)
+        users_collection.update_one({"_id": user_id}, {"$set": {"coins": new_coins, "last_crime": current_time}})
+        embed.title = "❌ ПОЙМАН СТРАЖЕЙ ПОРЯДКА"
+        embed.color = 0xE74C3C
+        embed.add_field(name="⚖️ Штраф", value=f"```diff\n-{fine} Колов\n```", inline=False)
+        embed.description = "Вас застигли на месте преступления! Элитная стража выписала штраф."
+    embed.set_footer(text="Криминальный мир нижних уровней")
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="rob", description="Попытаться совершить карманную кражу у другого игрока")
 @check_maintenance()
@@ -459,102 +472,102 @@ async def duel(interaction: discord.Interaction, target: discord.Member, amount:
 @bot.tree.command(name="dice", description="Бросить игральные кости против системы (Мин. ставка: 50)")
 @check_maintenance()
 async def dice(interaction: discord.Interaction, amount: int):
-  if not is_admin_or_mod(interaction.user) and amount < 50:
-      return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
-      
-  coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
-  if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств на балансе!", ephemeral=True)
+    if not is_admin_or_mod(interaction.user) and amount < 50:
+        return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
+        
+    coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств на балансе!", ephemeral=True)
 
-  users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
+    users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
-  embed_loading = discord.Embed(title="🎲 ИГРАЛЬНЫЕ КОСТИ", description="Ставки сделаны. Кости выбрасываются на игровой стол...", color=0x9B59B6)
-  embed_loading.set_image(url="https://i.pinimg.com/originals/80/9f/ba/809fba531ccbb8e24010696ffa1503e2.gif")
-  await interaction.response.send_message(embed=embed_loading)
-  await asyncio.sleep(3.0)
+    embed_loading = discord.Embed(title="🎲 ИГРАЛЬНЫЕ КОСТИ", description="Ставки сделаны. Кости выбрасываются на игровой стол...", color=0x9B59B6)
+    embed_loading.set_image(url="https://i.pinimg.com/originals/80/9f/ba/809fba531ccbb8e24010696ffa1503e2.gif")
+    await interaction.response.send_message(embed=embed_loading)
+    await asyncio.sleep(3.0)
 
-  p_roll, b_roll = random.randint(1, 6), random.randint(1, 6)
-  embed_res = discord.Embed(title="🎲 ИТОГ БРОСКА КОСТЕЙ", color=0x9B59B6)
+    p_roll, b_roll = random.randint(1, 6), random.randint(1, 6)
+    embed_res = discord.Embed(title="🎲 ИТОГ БРОСКА КОСТЕЙ", color=0x9B59B6)
 
-  if p_roll > b_roll:
-      users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
-      embed_res.add_field(name="🎲 Ваш бросок", value=f"```yaml\n{p_roll}\n```", inline=True)
-      embed_res.add_field(name="🤖 Бросок системы", value=f"```yaml\n{b_roll}\n```", inline=True)
-      embed_res.add_field(name="💼 Выигрыш", value=f"```fix\n+{amount:,} Колов\n```", inline=False)
-      embed_res.color = 0x2ECC71
-  elif p_roll < b_roll:
-      embed_res.add_field(name="🎲 Ваш бросок", value=f"```yaml\n{p_roll}\n```", inline=True)
-      embed_res.add_field(name="🤖 Бросок системы", value=f"```yaml\n{b_roll}\n```", inline=True)
-      embed_res.add_field(name="💼 Проигрыш", value=f"```diff\n-{amount:,} Колов\n```", inline=False)
-      embed_res.color = 0xE74C3C
-  else:
-      embed_res.description = f"🤝 **Ничья.** (`{p_roll}:{b_roll}`). Ставка полностью возвращена."
-      embed_res.color = 0xF1C40F
-  
-  await interaction.edit_original_response(embed=embed_res, attachments=[])
-  await add_xp(interaction, interaction.user.id, random.randint(5, 10))
+    if p_roll > b_roll:
+        users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
+        embed_res.add_field(name="🎲 Ваш бросок", value=f"```yaml\n{p_roll}\n```", inline=True)
+        embed_res.add_field(name="🤖 Бросок системы", value=f"```yaml\n{b_roll}\n```", inline=True)
+        embed_res.add_field(name="💼 Выигрыш", value=f"```fix\n+{amount:,} Колов\n```", inline=False)
+        embed_res.color = 0x2ECC71
+    elif p_roll < b_roll:
+        embed_res.add_field(name="🎲 Ваш бросок", value=f"```yaml\n{p_roll}\n```", inline=True)
+        embed_res.add_field(name="🤖 Бросок системы", value=f"```yaml\n{b_roll}\n```", inline=True)
+        embed_res.add_field(name="💼 Проигрыш", value=f"```diff\n-{amount:,} Колов\n```", inline=False)
+        embed_res.color = 0xE74C3C
+    else:
+        embed_res.description = f"🤝 **Ничья.** (`{p_roll}:{b_roll}`). Ставка полностью возвращена."
+        embed_res.color = 0xF1C40F
+    
+    await interaction.edit_original_response(embed=embed_res, attachments=[])
+    await add_xp(interaction, interaction.user.id, random.randint(5, 10))
 
 @bot.tree.command(name="coinflip", description="Испытать удачу в подбросе монетки (Орел и решка, Мин. ставка: 50)")
 @check_maintenance()
 @app_commands.choices(choice=[app_commands.Choice(name="Орел", value="орел"), app_commands.Choice(name="Решка", value="решка")])
 async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
-  if not is_admin_or_mod(interaction.user) and amount < 50:
-      return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
-      
-  coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
-  if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств на балансе!", ephemeral=True)
+    if not is_admin_or_mod(interaction.user) and amount < 50:
+        return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
+        
+    coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств на балансе!", ephemeral=True)
 
-  users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
+    users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
-  embed_loading = discord.Embed(title="🪙 ОРЕЛ И РЕШКА", description="Монета подброшена высоко в воздух...", color=0xF1C40F)
-  embed_loading.set_image(url="https://media.tenor.com/9PALsSO_XpsAAAAC/misaka-mikoto.gif")
-  await interaction.response.send_message(embed=embed_loading)
-  await asyncio.sleep(3.0)
+    embed_loading = discord.Embed(title="🪙 ОРЕЛ И РЕШКА", description="Монета подброшена высоко в воздух...", color=0xF1C40F)
+    embed_loading.set_image(url="https://media.tenor.com/9PALsSO_XpsAAAAC/misaka-mikoto.gif")
+    await interaction.response.send_message(embed=embed_loading)
+    await asyncio.sleep(3.0)
 
-  result = random.choice(["орел", "решка"])
-  embed_res = discord.Embed(title="🪙 РЕЗУЛЬТАТ МОНЕТКИ", color=0x2ECC71)
-  
-  if choice == result:
-      users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
-      embed_res.add_field(name="🎯 Выпало", value=f"```yaml\n{result.upper()}\n```", inline=False)
-      embed_res.add_field(name="💼 Выигрыш", value=f"```fix\n+{amount:,} Колов\n```", inline=False)
-  else:
-      embed_res.add_field(name="🎯 Выпало", value=f"```yaml\n{result.upper()}\n```", inline=False)
-      embed_res.add_field(name="💼 Проигрыш", value=f"```diff\n-{amount:,} Колов\n```", inline=False)
-      embed_res.color = 0xE74C3C
-      
-  await interaction.edit_original_response(embed=embed_res, attachments=[])
-  await add_xp(interaction, interaction.user.id, random.randint(5, 15))
+    result = random.choice(["орел", "решка"])
+    embed_res = discord.Embed(title="🪙 РЕЗУЛЬТАТ МОНЕТКИ", color=0x2ECC71)
+    
+    if choice == result:
+        users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
+        embed_res.add_field(name="🎯 Выпало", value=f"```yaml\n{result.upper()}\n```", inline=False)
+        embed_res.add_field(name="💼 Выигрыш", value=f"```fix\n+{amount:,} Колов\n```", inline=False)
+    else:
+        embed_res.add_field(name="🎯 Выпало", value=f"```yaml\n{result.upper()}\n```", inline=False)
+        embed_res.add_field(name="💼 Проигрыш", value=f"```diff\n-{amount:,} Колов\n```", inline=False)
+        embed_res.color = 0xE74C3C
+        
+    await interaction.edit_original_response(embed=embed_res, attachments=[])
+    await add_xp(interaction, interaction.user.id, random.randint(5, 15))
 
 @bot.tree.command(name="roulette", description="Сыграть в смертельную Русскую рулетку (Мин. ставка: 50)")
 @check_maintenance()
 async def roulette(interaction: discord.Interaction, amount: int):
-  if not is_admin_or_mod(interaction.user) and amount < 50:
-      return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
-      
-  coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
-  if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств на балансе!", ephemeral=True)
+    if not is_admin_or_mod(interaction.user) and amount < 50:
+        return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
+        
+    coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств на балансе!", ephemeral=True)
 
-  users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
+    users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
-  embed_loading = discord.Embed(title="🎯 РУССКАЯ РУЛЕТКА", description="Барабан револьвера заряжен и начинает вращение...", color=0xE74C3C)
-  embed_loading.set_image(url="https://i.pinimg.com/originals/ac/56/c5/ac56c5c7e6037a698e22c9a30a8dccda.gif")
-  await interaction.response.send_message(embed=embed_loading)
-  await asyncio.sleep(3.0)
+    embed_loading = discord.Embed(title="🎯 РУССКАЯ РУЛЕТКА", description="Барабан револьвера заряжен и начинает вращение...", color=0xE74C3C)
+    embed_loading.set_image(url="https://i.pinimg.com/originals/ac/56/c5/ac56c5c7e6037a698e22c9a30a8dccda.gif")
+    await interaction.response.send_message(embed=embed_loading)
+    await asyncio.sleep(3.0)
 
-  shot = random.choice([True, False, False, False, False, False])
-  embed_res = discord.Embed(title="🎯 ИТОГ РУССКОЙ РУЛЕТКИ", color=0xE74C3C)
-  
-  if not shot:
-      users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
-      embed_res.add_field(name="💥 Барабан", value="```yaml\nПустая камера (ЩЕЛК)\n```", inline=False)
-      embed_res.add_field(name="💼 Выигрыш", value=f"```fix\n+{amount:,} Колов\n```", inline=False)
-      embed_res.color = 0x2ECC71
-  else:
-      embed_res.add_field(name="💀 Барабан", value="```diff\n- Смертельный выстрел (БАХ)\n```", inline=False)
-      embed_res.add_field(name="💼 Проигрыш", value=f"```diff\n-{amount:,} Колов\n```", inline=False)
-      
-  await interaction.edit_original_response(embed=embed_res, attachments=[])
-  await add_xp(interaction, interaction.user.id, random.randint(10, 20))
+    shot = random.choice([True, False, False, False, False, False])
+    embed_res = discord.Embed(title="🎯 ИТОГ РУССКОЙ РУЛЕТКИ", color=0xE74C3C)
+    
+    if not shot:
+        users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount * 2}})
+        embed_res.add_field(name="💥 Барабан", value="```yaml\nПустая камера (ЩЕЛК)\n```", inline=False)
+        embed_res.add_field(name="💼 Выигрыш", value=f"```fix\n+{amount:,} Колов\n```", inline=False)
+        embed_res.color = 0x2ECC71
+    else:
+        embed_res.add_field(name="💀 Барабан", value="```diff\n- Смертельный выстрел (БАХ)\n```", inline=False)
+        embed_res.add_field(name="💼 Проигрыш", value=f"```diff\n-{amount:,} Колов\n```", inline=False)
+        
+    await interaction.edit_original_response(embed=embed_res, attachments=[])
+    await add_xp(interaction, interaction.user.id, random.randint(10, 20))
 
 
 # --- МАГАЗИН И УПРАВЛЕНИЕ РОЛЯМИ / ТИТУЛАМИ (РАСШИРЕННЫЙ BAGGY ФОРМАТ) ---
@@ -1295,9 +1308,16 @@ async def setup_verify(interaction: discord.Interaction):
     app_commands.Choice(name="Женщина ♀️", value="♀️")
 ])
 async def verify_user(interaction: discord.Interaction, member: discord.Member, gender: str):
-    # Если нужно, можешь добавить проверку на конкретную роль "Саппорт" в функцию is_admin_or_mod
-    if not is_admin_or_mod(interaction.user): 
-        return await interaction.response.send_message("❌ У вас нет прав саппорта для верификации игроков!", ephemeral=True)
+    # Проверка на наличие прав Администратора, либо ролей Support / Moderator
+    has_perms = interaction.user.guild_permissions.administrator
+    if not has_perms:
+        role_names = [r.name.lower() for r in interaction.user.roles]
+        # Бот ищет роли по названию (в нижнем регистре для надежности)
+        if any(r in role_names for r in ["moderator", "модератор", "support", "саппорт", "founder", "co-founder"]):
+            has_perms = True
+
+    if not has_perms: 
+        return await interaction.response.send_message("❌ У вас нет прав саппорта или модератора для верификации игроков!", ephemeral=True)
         
     role = discord.utils.get(interaction.guild.roles, name=gender)
     if not role:
@@ -1307,33 +1327,65 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
         # Выдаем гендерную роль
         await member.add_roles(role)
         
-        # Если у вас есть стартовая роль, которая ограничивала права, бот ее снимет. 
-        # (Обязательно создай роль "Неверифицированный" на сервере, если хочешь чтобы это работало)
+        # Снимаем стартовую роль unverify
         unverified_role = discord.utils.get(interaction.guild.roles, name="unverify")
         if unverified_role and unverified_role in member.roles:
             await member.remove_roles(unverified_role)
             
         embed = discord.Embed(
             title="✅ ВЕРИФИКАЦИЯ УСПЕШНА", 
-            description=f"Игрок {member.mention} прошел голосовую проверку у саппорта {interaction.user.mention} и получил статус **{gender}**.\n\nДобро пожаловать в Айнкрад!", 
+            description=f"Игрок {member.mention} прошел голосовую проверку и получил статус **{gender}**.\nРоль выдал: {interaction.user.mention}", 
             color=0x2ECC71
         )
         embed.set_thumbnail(url=member.display_avatar.url)
-        await interaction.response.send_message(embed=embed)
+        
+        # ephemeral=True делает сообщение исчезающим (видит только автор команды)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         
     except Exception as e:
-        await interaction.response.send_message(f"❌ Ошибка доступа: бот не может выдать роль (возможно роль бота ниже роли, которую он пытается выдать). Подробности: {e}", ephemeral=True)
-        
-@bot.event
-async def on_member_join(member: discord.Member):
-    # Ищем роль по ее точному названию (можешь заменить "User" на ту, которая тебе нужна)
-    role = discord.utils.get(member.guild.roles, name="unverify") 
-    if role:
-        try:
-            await member.add_roles(role)
-            print(f"[СИСТЕМА] Автоматически выдана роль {role.name} новому участнику {member.name}")
-        except Exception as e:
-            print(f"[ОШИБКА] Не удалось выдать роль новичку: {e}")
+        await interaction.response.send_message(f"❌ Ошибка доступа: бот не может выдать роль (возможно, роль бота в настройках ниже выдаваемой роли). Подробности: {e}", ephemeral=True)
+
+# --- КОМАНДА SETUP RANKS ---
+
+@bot.tree.command(name="setup_ranks", description="[АДМИН] Установить информационное сообщение о системе рангов и этажей")
+async def setup_ranks(interaction: discord.Interaction):
+    if not is_admin_or_mod(interaction.user): 
+        return await interaction.response.send_message("❌ У вас нет прав для этой команды.", ephemeral=True)
+    
+    embed = discord.Embed(
+        title="─── ┌ ⚡ СИСТЕМА ПРОХОЖДЕНИЯ БАШНИ ┐ ───", 
+        description=(
+            "«Добро пожаловать в мир, где каждый шаг наверх приносит награду. Общайтесь в чатах и сидите в войсах, чтобы преодолевать этажи и открывать новые зоны». 🛡️\n\n"
+            "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n\n"
+            "**🏆 ИЕРАРХИЯ ЭТАЖЕЙ И НАГРАДЫ**\n"
+            "👤 `Обычный житель` (Без этажа)\n"
+            "⚪ `Начало Легенды` (LVL 2) — 60-80 Колов / день\n"
+            "🟢 `Путешественник` (LVL 5) — 70-100 Колов / день\n"
+            "🔵 `Разведчик Рубежа` (LVL 10) — 90-130 Колов / день\n"
+            "💠 `Опытный Мечник` (LVL 15) — 110-150 Колов / день\n"
+            "🟣 `Передовой Воин` (LVL 20) — 140-180 Колов / день\n"
+            "🟠 `Закаленный Огнем` (LVL 30) — 170-220 Колов / день\n"
+            "🔴 `Мастер клинка` (LVL 40) — 210-270 Колов / день\n"
+            "🩷 `Герой Айнкрада` (LVL 50) — 260-340 Колов / день\n"
+            "⚫ `Грандмастер` (LVL 65) — 350-450 Колов / день\n"
+            "👑 `Вершитель Судеб` (LVL 80) — 480-650 Колов / день\n"
+            "⚔️ `Beater` (LVL 100) — 800-1000 Колов / день\n\n"
+            "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n\n"
+            "**💎 ЭЛИТНЫЙ СТАТУС БУСТЕРА**\n"
+            "🌟 `Бустер сервера` — **500 Колов / день!**\n\n"
+            "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n\n"
+            "**⚙️ ПОЛЕЗНЫЕ КОМАНДЫ КАРДИНАЛА**\n"
+            "📊 `/profile` — ваш текущий этаж, капитал и прогресс.\n"
+            "🏆 `/leaderboard` — глобальная таблица топ-10 игроков.\n"
+            "🎁 `/daily` — забрать системную награду в виде **Колов и Опыта (XP)**. Размер бонуса растет от вашего этажа и серии ежедневных входов!"
+        ),
+        color=0xE02653
+    )
+    embed.set_image(url="https://i.pinimg.com/originals/8e/ec/f2/8eecf2daed72882f84ff0cdd8eaa9333.gif")
+    embed.set_footer(text="Aincrad Leveling System • Разработано системой Кардинал")
+    
+    await interaction.channel.send(embed=embed)
+    await interaction.response.send_message("✅ Информационное сообщение о рангах успешно установлено в канал.", ephemeral=True)
 
 keep_alive()
 bot.run(os.getenv("TOKEN"))
