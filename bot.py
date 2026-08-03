@@ -1423,7 +1423,6 @@ async def setup_verify(interaction: discord.Interaction):
     app_commands.Choice(name="Женщина ♀️", value="♀️")
 ])
 async def verify_user(interaction: discord.Interaction, member: discord.Member, gender: str):
-    # Проверка на наличие прав Администратора, либо ролей Support / Moderator
     has_perms = interaction.user.guild_permissions.administrator
     if not has_perms:
         role_names = [r.name.lower() for r in interaction.user.roles]
@@ -1438,10 +1437,8 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
         return await interaction.response.send_message(f"❌ Системная ошибка: Роль «{gender}» не найдена на сервере.", ephemeral=True)
         
     try:
-        # Выдаем гендерную роль
         await member.add_roles(role)
         
-        # Снимаем стартовую роль unverify
         unverified_role = discord.utils.get(interaction.guild.roles, name="unverify")
         if unverified_role and unverified_role in member.roles:
             await member.remove_roles(unverified_role)
@@ -1452,10 +1449,9 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
             color=0x2ECC71
         )
         embed.set_thumbnail(url=member.display_avatar.url)
-        
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        # Отправка DOCS в закрытый канал для стаффа
+        # Отправка DOCS в закрытый канал для стаффа с автоматической вставкой ID
         docs_channel = interaction.guild.get_channel(DOCS_CHANNEL_ID)
         if docs_channel:
             docs_embed = discord.Embed(title="📁 DOCS: ИДЕНТИФИКАЦИЯ ИГРОКА", color=0x2B2D31)
@@ -1466,12 +1462,15 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
             
             created_at = discord.utils.format_dt(member.created_at, style='F')
             docs_embed.add_field(name="Аккаунт создан", value=created_at, inline=False)
-            docs_embed.add_field(name="Discord Sensor (Логи)", value=f"[Перейти к профилю](https://discord.id/?prefill={member.id})", inline=False)
+            
+            # Автоматическая ссылка, куда уже вшит ID игрока
+            sensor_link = f"https://discord.id/?prefill={member.id}"
+            docs_embed.add_field(name="Discord Sensor (Логи)", value=f"🔗 [Открыть профиль по ID]({sensor_link})", inline=False)
             
             await docs_channel.send(embed=docs_embed)
             
     except Exception as e:
-        await interaction.response.send_message(f"❌ Ошибка доступа: бот не может выдать роль (возможно, роль бота в настройках ниже выдаваемой роли). Подробности: {e}", ephemeral=True)
+        await interaction.response.send_message(f"❌ Ошибка доступа: бот не может выдать роль. Подробности: {e}", ephemeral=True)
 
 # --- КОМАНДА SETUP RANKS ---
 
