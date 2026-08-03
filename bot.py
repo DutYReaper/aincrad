@@ -20,7 +20,7 @@ custom_roles_collection = db.custom_roles
 auction_collection = db.auction_roles
 titles_collection = db.user_titles
 guilds_collection = db.guilds
-guild_requests_collection = db.guild_requests # НОВАЯ: Коллекция для логов и заявок гильдий
+guild_requests_collection = db.guilds_collection if hasattr(db, 'guild_requests') else db.guild_requests # Коллекция для логов и заявок гильдий
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -91,7 +91,6 @@ def is_admin_or_mod(member: discord.Member):
     if member.guild_permissions.administrator:
         return True
     role_names = [r.name.lower() for r in member.roles]
-    # Добавлены все роли администрации Айнкрада
     allowed_roles = ["модератор", "moderator", "администратор", "administrator", "саппорт", "support", "founder", "co-founder", "content maker", "sigmo brazzers"]
     if any(role in role_names for role in allowed_roles):
         return True
@@ -207,7 +206,6 @@ async def on_message(message):
     if MAINTENANCE_MODE and not is_admin_or_mod(message.author):
         return
 
-    # Проверка привилегий
     is_privileged = False
     if message.author.guild_permissions.administrator:
         is_privileged = True
@@ -296,324 +294,6 @@ async def on_message(message):
                     log_embed.add_field(name="👤 Пользователь", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
                     log_embed.add_field(name="📅 Аккаунт создан", value=created_at, inline=True)
                     log_embed.add_field(name="📂 Канал", value=message.channel.mention, inline=True)
-                    log_embed.add_field(name="⚡ Причина", value=f"Привет! Я проанализировал твой масштабный код бота для Айнкрада. В нем уже реализовано множество отличных систем: экономика, гильдии, кастомные роли, аукцион, уровни и автомодерация.
-
-Главное исправление, которое я внес прямо сейчас — **очистил код от скрытых неразрывных пробелов** (символов `\xa0`). В твоем исходнике отступы были сделаны с их помощью, из-за чего Python моментально выдавал бы критическую ошибку `IndentationError` при попытке запуска. Теперь код отформатирован корректно стандартными пробелами и готов к работе.
-
-Поскольку в твоем сообщении не было указано, **какие именно** новые фичи или баги нужно было исправить в этот раз, база кода осталась оригинальной, но полностью рабочей.
-
-Вот очищенная и готовая к запуску версия:
-
-```python
-import os
-import certifi
-import random
-import time
-import asyncio
-import discord
-from pymongo import MongoClient
-from discord import app_commands
-from discord.ext import commands
-from keep_alive import keep_alive
-
-# Достаем ссылку на базу из переменных окружения
-MONGO_URI = os.getenv('MONGO_URI')
-
-# Подключаемся с поддержкой сертификатов certifi
-cluster = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-db = cluster.aincrad_data
-users_collection = db.users
-custom_roles_collection = db.custom_roles
-auction_collection = db.auction_roles
-titles_collection = db.user_titles
-guilds_collection = db.guilds
-
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.voice_states = True # ВАЖНО: Включено для отслеживания войс-активности
-
-# Оптимизация памяти для хостинга
-bot = commands.Bot(
-    command_prefix="!", 
-    intents=intents,
-    chunk_guilds_at_startup=False,
-    max_messages=10
-)
-
-# Глобальный флаг режима техобслуживания
-MAINTENANCE_MODE = False
-
-# --- НАСТРОЙКИ АВТОМОДА ДЛЯ МЕДИА ---
-# Укажи ID канала, куда РАЗРЕШЕНО отправлять картинки и видео (например: 123456789012345678). 
-# Если поставить None, то автомод будет проверять сообщения везде, но разрешать одиночные картинки/гифки.
-MEDIA_CHANNEL_ID = None
-
-# --- СЛОВАРИ ДЛЯ ANTI-AFK И АВТОМОДЕРАЦИИ ---
-voice_start_times = {} # Время начала активной фазы
-voice_accumulated = {} # Накопленное чистое время за сессию
-
-# --- СЛОВАРИ ДЛЯ АВТОМОДА ---
-user_last_message_time = {}
-user_message_timestamps = {}
-user_message_history = {}
-log_cooldowns = {} # Защита от заспамливания самого канала логов
-
-AUTO_MOD_LOG_CHANNEL_ID = 1529472394102706336
-
-def get_or_create_user(user_id):
-    user = users_collection.find_one({"_id": user_id})
-    if user is None:
-        new_user = {
-            "_id": user_id,
-            "coins": 100,
-            "xp": 0,
-            "level": 1,
-            "last_daily": 0.0,
-            "last_work": 0.0,
-            "last_crime": 0.0,
-            "last_rob": 0.0,
-            "streak": 0,
-            "guild_id": None,
-            "special_title": "Отсутствует",
-            "voice_time": 0.0 # Новое поле для хранения времени в войсе (в секундах)
-        }
-        users_collection.insert_one(new_user)
-        return 100, 0, 1, 0.0, 0.0, 0.0, 0.0, 0, None, 'Отсутствует', 0.0
-    
-    return (
-        user.get("coins", 100),
-        user.get("xp", 0),
-        user.get("level", 1),
-        user.get("last_daily", 0.0),
-        user.get("last_work", 0.0),
-        user.get("last_crime", 0.0),
-        user.get("last_rob", 0.0),
-        user.get("streak", 0),
-        user.get("guild_id", None),
-        user.get("special_title", "Отсутствует"),
-        user.get("voice_time", 0.0)
-    )
-
-def is_admin_or_mod(member: discord.Member):
-    if member.guild_permissions.administrator:
-        return True
-    role_names = [r.name.lower() for r in member.roles]
-    # Добавлены все роли администрации Айнкрада
-    allowed_roles = ["модератор", "moderator", "администратор", "administrator", "саппорт", "support", "founder", "co-founder", "content maker", "sigmo brazzers"]
-    if any(role in role_names for role in allowed_roles):
-        return True
-    return False
-
-# ЖЕСТКИЙ ДЕКОРАТОР ПРОВЕРКИ ТЕХОБСЛУЖИВАНИЯ
-def check_maintenance():
-    async def predicate(interaction: discord.Interaction) -> bool:
-        global MAINTENANCE_MODE
-        if MAINTENANCE_MODE and not is_admin_or_mod(interaction.user):
-            await interaction.response.send_message(
-                "🛠️ **[ SYSTEM ALERT: КАРДИНАЛ АКТИВЕН ]**\n"
-                "На сервере проводятся технические работы. Доступ к системным интерфейсам временно заблокирован.", 
-                ephemeral=True
-            )
-            return False
-        return True
-    return app_commands.check(predicate)
-
-async def check_level_roles(member: discord.Member, current_level: int):
-    highest_role_name = None
-    for req_level, data in sorted(ROLES_MAPPING.items(), reverse=True):
-        if current_level >= req_level:
-            highest_role_name = data["name"]
-            break
-            
-    if not highest_role_name:
-        return
-
-    highest_role = discord.utils.get(member.guild.roles, name=highest_role_name)
-    roles_to_remove = []
-    for req_level, data in ROLES_MAPPING.items():
-        r_name = data["name"]
-        if r_name != highest_role_name:
-            old_role = discord.utils.get(member.guild.roles, name=r_name)
-            if old_role and old_role in member.roles:
-                roles_to_remove.append(old_role)
-                
-    if roles_to_remove:
-        try:
-            await member.remove_roles(*roles_to_remove)
-        except Exception:
-            pass
-
-    if highest_role and highest_role not in member.roles:
-        try:
-            await member.add_roles(highest_role)
-            await member.send(f"🎉 Поздравляем! Вы прорвались на **{current_level} этаж** Айнкрада и получили элитный статус **{highest_role_name}**!")
-        except Exception:
-            pass
-
-ROLES_MAPPING = {
-    2: {"name": "Начало Легенды (LVL 2)", "min_daily": 60, "max_daily": 80},
-    5: {"name": "Путешественник (LVL 5)", "min_daily": 70, "max_daily": 100},
-    10: {"name": "Разведчик Рубежа (LVL 10)", "min_daily": 90, "max_daily": 130},
-    15: {"name": "Опытный Мечник (LVL 15)", "min_daily": 110, "max_daily": 150},
-    20: {"name": "Передовой Воин (LVL 20)", "min_daily": 140, "max_daily": 180},
-    30: {"name": "Закаленный Огнем (LVL 30)", "min_daily": 170, "max_daily": 220},
-    40: {"name": "Мастер клинка (LVL 40)", "min_daily": 210, "max_daily": 270},
-    50: {"name": "Герой Айнкрада (LVL 50)", "min_daily": 260, "max_daily": 340},
-    65: {"name": "Грандмастер (LVL 65)", "min_daily": 350, "max_daily": 450},
-    80: {"name": "Вершитель Судеб (LVL 80)", "min_daily": 480, "max_daily": 650},
-    100: {"name": "Beater (LVL 100)", "min_daily": 800, "max_daily": 1000},
-}
-
-async def add_xp(interaction_or_member, user_id, amount):
-    coins, xp, level, _, _, _, _, _, _, _, _ = get_or_create_user(user_id)
-    xp += amount
-    next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
-    leveled_up = False
-    
-    while xp >= next_level_xp:
-        level += 1
-        xp -= next_level_xp
-        next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
-        leveled_up = True
-
-    users_collection.update_one({"_id": user_id}, {"$set": {"xp": xp, "level": level}})
-
-    if leveled_up:
-        if isinstance(interaction_or_member, discord.Member):
-            member = interaction_or_member
-            channel = None
-        else:
-            member = getattr(interaction_or_member, 'user', getattr(interaction_or_member, 'author', None))
-            channel = getattr(interaction_or_member, 'channel', None)
-        
-        if member:
-            await check_level_roles(member, level)
-            if channel:
-                lvl_embed = discord.Embed(title="⚡ СИСТЕМНОЕ УВЕДОМЛЕНИЕ: ПОВЫШЕНИЕ ЭТАЖА", description=f"Поздравляем! Игрок успешно прорвался на **{level} этаж** башни Айнкрад!", color=0x00BFFF)
-                lvl_embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
-                try:
-                    await channel.send(
-                        content=f"Внимание, Система: {member.mention} устанавливает новые рекорды!", 
-                        embed=lvl_embed, 
-                        delete_after=10.0
-                    )
-                except Exception:
-                    pass
-
-@bot.event
-async def on_ready():
-    await bot.tree.sync()
-    print(f"Бот {bot.user} запущен и полностью готов к работе в Айнкраде!")
-
-@bot.event
-async def on_message(message):
-    if message.author.bot or not message.guild:
-        return
-        
-    global MAINTENANCE_MODE
-    if MAINTENANCE_MODE and not is_admin_or_mod(message.author):
-        return
-
-    # Проверка привилегий (Админы и спец-роли стаффа обходят автомод)
-    is_privileged = False
-    if message.author.guild_permissions.administrator:
-        is_privileged = True
-    else:
-        role_names = [r.name.lower() for r in message.author.roles]
-        allowed_roles = [
-            "founder", "co-founder", "moderator", "модератор", 
-            "support", "саппорт", "content maker", "sigmo brazzers"
-        ]
-        if any(role in role_names for role in allowed_roles):
-            is_privileged = True
-
-    # --- УМНАЯ АВТОМОДЕРАЦИЯ И АНТИ-СПАМ ---
-    if not is_privileged:
-        content_lower = message.content.lower().strip()
-        
-        # 1. Сначала определяем безопасные медиа-домены (с новыми добавлениями)
-        safe_domains = [
-            "tenor.com", "giphy.com", "imgur.com", "discordapp.com", 
-            "discord.com", "pinimg.com", "klipy.com", "alphacoders.com"
-        ]
-        is_gif_or_media_link = any(domain in content_lower for domain in safe_domains) or ".gif" in content_lower
-
-        # 2. Проверяем инвайты
-        has_invite = "discord.gg/" in content_lower or "[discord.com/invite](https://discord.com/invite)" in content_lower or "invite.gg/" in content_lower
-        
-        # 3. Фиксируем ссылку, ТОЛЬКО ЕСЛИ она НЕ является безопасной гифкой/картинкой
-        is_raw_url = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower
-        has_link = is_raw_url and not is_gif_or_media_link
-        
-        has_mass_ping = "@everyone" in message.content or "@here" in message.content
-
-        total_attachments = len(message.attachments)
-        
-        # Считаем спам-рассылкой, если прикреплено 3 и более файлов/картинок разом (как рассылка казика)
-        is_mass_image_spam = total_attachments >= 3 and not is_gif_or_media_link
-        
-        is_media_channel = MEDIA_CHANNEL_ID is not None and message.channel.id == MEDIA_CHANNEL_ID
-
-        user_id = message.author.id
-        current_time = time.time()
-        is_fast_flood = False
-
-        # Защита от быстрого флуда: КД между сообщениями в 1.5 секунды
-        if user_id in user_last_message_time:
-            time_diff = current_time - user_last_message_time[user_id]
-            if time_diff < 1.5:
-                is_fast_flood = True
-
-        user_last_message_time[user_id] = current_time
-
-        # Проверка на жесткий капс (букв > 8 и >70% заглавных)
-        letters = [c for c in message.content if c.isalpha()]
-        is_caps_spam = False
-        if len(letters) > 8:
-            caps_count = sum(1 for c in letters if c.isupper())
-            if (caps_count / len(letters)) > 0.7:
-                is_caps_spam = True
-
-        violation_reason = None
-        if has_invite:
-            violation_reason = "Попытка публикации стороннего инвайта"
-        elif has_link:
-            violation_reason = f"Публикация неразрешенной ссылки (`{message.content}`)"
-        elif has_mass_ping:
-            violation_reason = "Массовый пинг (`@everyone` / `@here`)"
-        elif is_mass_image_spam and not is_media_channel:
-            violation_reason = f"Массовый спам картинками/скринами ({total_attachments} шт. в одном сообщении)"
-        elif is_fast_flood:
-            violation_reason = "Слишком быстрый флуд (превышен лимит КД 1.5 сек)"
-        elif is_caps_spam:
-            violation_reason = "Чрезмерное использование капса (Caps Lock Spam)"
-
-        if violation_reason:
-            try:
-                await message.delete()
-            except Exception as e:
-                print(f"[ОШИБКА АВТОМОДА] Не удалось удалить сообщение: {e}")
-
-            # Защита канала логов от заспамливания (отправляем лог не чаще 1 раза в 15 секунд на одного юзера)
-            should_send_log = True
-            if user_id in log_cooldowns:
-                if current_time - log_cooldowns[user_id] < 15.0:
-                    should_send_log = False
-            
-            if should_send_log:
-                log_cooldowns[user_id] = current_time
-                log_channel = message.guild.get_channel(AUTO_MOD_LOG_CHANNEL_ID)
-                if log_channel:
-                    created_at = discord.utils.format_dt(message.author.created_at, style='R')
-                    log_embed = discord.Embed(
-                        title="⚠️ КАРДИНАЛ: НОВЫЙ ОТЧЕТ АВТОМОДА",
-                        color=0xE74C3C
-                    )
-                    log_embed.set_thumbnail(url=message.author.display_avatar.url)
-                    log_embed.add_field(name="👤 Пользователь", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
-                    log_embed.add_field(name="📅 Аккаунт создан", value=created_at, inline=True)
-                    log_embed.add_field(name="📂 Канал", value=message.channel.mention, inline=True)
                     log_embed.add_field(name="⚡ Причина", value=f"```yaml\n{violation_reason}\n```", inline=False)
                     log_embed.add_field(name="💬 Нарушение", value=f"```text\n{message.content if message.content else '[Медиа / Вложение]'}\n```", inline=False)
                     log_embed.set_footer(text="Aincrad Security Shield • Сообщение удалено")
@@ -621,361 +301,11 @@ async def on_message(message):
                         await log_channel.send(embed=log_embed)
                     except Exception:
                         pass
-            return # Стоп! Опыт не начисляется, команды не обрабатываются.
+            return
 
-    # Начисление опыта за чистое сообщение и обработка команд
     await add_xp(message, message.author.id, random.randint(2, 5))
     await bot.process_commands(message)
 
-
-# --- СИСТЕМА ВОЙС-АКТИВНОСТИ (ANTI-AFK) ---
-def is_afk(voice_state):
-    return voice_state.self_mute or voice_state.mute or voice_state.self_deaf or voice_state.deaf or voice_state.afk
-
-@bot.event
-async def on_voice_state_update(member, before, after):
-    if member.bot: return
-    
-    was_afk = before.channel is None or is_afk(before)
-    is_afk_now = after.channel is None or is_afk(after)
-    
-    if was_afk and not is_afk_now:
-        voice_start_times[member.id] = time.time()
-        if member.id not in voice_accumulated:
-            voice_accumulated[member.id] = 0.0
-
-    elif not was_afk and is_afk_now:
-        if member.id in voice_start_times:
-            session_time = time.time() - voice_start_times.pop(member.id)
-            voice_accumulated[member.id] = voice_accumulated.get(member.id, 0.0) + session_time
-
-    if before.channel is not None and after.channel is None:
-        if member.id in voice_start_times:
-            session_time = time.time() - voice_start_times.pop(member.id)
-            voice_accumulated[member.id] = voice_accumulated.get(member.id, 0.0) + session_time
-        
-        total_time = voice_accumulated.pop(member.id, 0.0)
-Привет, Тимур! Я провел полный аудит твоего кода. В нем была скрытая, но очень неприятная проблема — невидимые символы (неразрывные пробелы `U+00A0`), из-за которых Python мог бы выдавать ошибку `SyntaxError`. Я полностью очистил код от них.
-
-Кроме этого, я **исправил и улучшил** следующие моменты:
-1. **Аукцион ролей:** Полностью переписал логику `AuctionPagingView`. Раньше кнопки перелистывания страниц выдавали ошибку атрибутов и ломались. Теперь пагинация и покупка работают идеально.
-2. **Защита от эксплойтов (Абуз казино):** В играх (кубики, рулетка, монетка) игроки могли ввести отрицательную ставку (например, `-5000`) и багом получать деньги. Я установил жесткий лимит на минимальную ставку (50 Колов) для всех, включая админов.
-3. **Безопасность магазина:** Добавил проверку в `/shop` на наличие роли `Неприкасаемый` на самом сервере перед тем, как списать у игрока деньги за неё. 
-4. **Увеличены тайм-ауты (UX):** Многие меню (магазин, гильдии, аукцион) закрывались ровно через 60 секунд (`timeout=60`), из-за чего кнопки переставали работать. Я увеличил время их жизни до 5 минут (`timeout=300`).
-5. **Баг с выходом из гильдии:** Исправлена ошибка, из-за которой покинувший гильдию лидер мог случайно снова назначиться лидером.
-
-Вот полностью готовый, исправленный и оптимизированный код. Ничего не забыто, все команды на месте:
-
-```python
-import os
-import certifi
-import random
-import time
-import asyncio
-import discord
-from pymongo import MongoClient
-from discord import app_commands
-from discord.ext import commands
-from keep_alive import keep_alive
-
-# Достаем ссылку на базу из переменных окружения
-MONGO_URI = os.getenv('MONGO_URI')
-
-# Подключаемся с поддержкой сертификатов certifi
-cluster = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-db = cluster.aincrad_data
-users_collection = db.users
-custom_roles_collection = db.custom_roles
-auction_collection = db.auction_roles
-titles_collection = db.user_titles
-guilds_collection = db.guilds
-
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.voice_states = True # ВАЖНО: Включено для отслеживания войс-активности
-
-# Оптимизация памяти для хостинга
-bot = commands.Bot(
-    command_prefix="!", 
-    intents=intents,
-    chunk_guilds_at_startup=False,
-    max_messages=10
-)
-
-# Глобальный флаг режима техобслуживания
-MAINTENANCE_MODE = False
-
-# --- НАСТРОЙКИ АВТОМОДА ДЛЯ МЕДИА ---
-MEDIA_CHANNEL_ID = None
-
-# --- СЛОВАРИ ДЛЯ ANTI-AFK И АВТОМОДЕРАЦИИ ---
-voice_start_times = {} # Время начала активной фазы
-voice_accumulated = {} # Накопленное чистое время за сессию
-
-user_last_message_time = {}
-user_message_timestamps = {}
-user_message_history = {}
-log_cooldowns = {} # Защита от заспамливания самого канала логов
-
-AUTO_MOD_LOG_CHANNEL_ID = 1529472394102706336
-
-def get_or_create_user(user_id):
-    user = users_collection.find_one({"_id": user_id})
-    if user is None:
-        new_user = {
-            "_id": user_id,
-            "coins": 100,
-            "xp": 0,
-            "level": 1,
-            "last_daily": 0.0,
-            "last_work": 0.0,
-            "last_crime": 0.0,
-            "last_rob": 0.0,
-            "streak": 0,
-            "guild_id": None,
-            "special_title": "Отсутствует",
-            "voice_time": 0.0
-        }
-        users_collection.insert_one(new_user)
-        return 100, 0, 1, 0.0, 0.0, 0.0, 0.0, 0, None, 'Отсутствует', 0.0
-    
-    return (
-        user.get("coins", 100),
-        user.get("xp", 0),
-        user.get("level", 1),
-        user.get("last_daily", 0.0),
-        user.get("last_work", 0.0),
-        user.get("last_crime", 0.0),
-        user.get("last_rob", 0.0),
-        user.get("streak", 0),
-        user.get("guild_id", None),
-        user.get("special_title", "Отсутствует"),
-        user.get("voice_time", 0.0)
-    )
-
-def is_admin_or_mod(member: discord.Member):
-    if member.guild_permissions.administrator:
-        return True
-    role_names = [r.name.lower() for r in member.roles]
-    allowed_roles = ["модератор", "moderator", "администратор", "administrator", "саппорт", "support", "founder", "co-founder", "content maker", "sigmo brazzers"]
-    if any(role in role_names for role in allowed_roles):
-        return True
-    return False
-
-# ЖЕСТКИЙ ДЕКОРАТОР ПРОВЕРКИ ТЕХОБСЛУЖИВАНИЯ
-def check_maintenance():
-    async def predicate(interaction: discord.Interaction) -> bool:
-        global MAINTENANCE_MODE
-        if MAINTENANCE_MODE and not is_admin_or_mod(interaction.user):
-            await interaction.response.send_message(
-                "🛠️ **[ SYSTEM ALERT: КАРДИНАЛ АКТИВЕН ]**\n"
-                "На сервере проводятся технические работы. Доступ к системным интерфейсам временно заблокирован.", 
-                ephemeral=True
-            )
-            return False
-        return True
-    return app_commands.check(predicate)
-
-async def check_level_roles(member: discord.Member, current_level: int):
-    highest_role_name = None
-    for req_level, data in sorted(ROLES_MAPPING.items(), reverse=True):
-        if current_level >= req_level:
-            highest_role_name = data["name"]
-            break
-            
-    if not highest_role_name:
-        return
-
-    highest_role = discord.utils.get(member.guild.roles, name=highest_role_name)
-    roles_to_remove = []
-    for req_level, data in ROLES_MAPPING.items():
-        r_name = data["name"]
-        if r_name != highest_role_name:
-            old_role = discord.utils.get(member.guild.roles, name=r_name)
-            if old_role and old_role in member.roles:
-                roles_to_remove.append(old_role)
-                
-    if roles_to_remove:
-        try:
-            await member.remove_roles(*roles_to_remove)
-        except Exception:
-            pass
-
-    if highest_role and highest_role not in member.roles:
-        try:
-            await member.add_roles(highest_role)
-            await member.send(f"🎉 Поздравляем! Вы прорвались на **{current_level} этаж** Айнкрада и получили элитный статус **{highest_role_name}**!")
-        except Exception:
-            pass
-
-ROLES_MAPPING = {
-    2: {"name": "Начало Легенды (LVL 2)", "min_daily": 60, "max_daily": 80},
-    5: {"name": "Путешественник (LVL 5)", "min_daily": 70, "max_daily": 100},
-    10: {"name": "Разведчик Рубежа (LVL 10)", "min_daily": 90, "max_daily": 130},
-    15: {"name": "Опытный Мечник (LVL 15)", "min_daily": 110, "max_daily": 150},
-    20: {"name": "Передовой Воин (LVL 20)", "min_daily": 140, "max_daily": 180},
-    30: {"name": "Закаленный Огнем (LVL 30)", "min_daily": 170, "max_daily": 220},
-    40: {"name": "Мастер клинка (LVL 40)", "min_daily": 210, "max_daily": 270},
-    50: {"name": "Герой Айнкрада (LVL 50)", "min_daily": 260, "max_daily": 340},
-    65: {"name": "Грандмастер (LVL 65)", "min_daily": 350, "max_daily": 450},
-    80: {"name": "Вершитель Судеб (LVL 80)", "min_daily": 480, "max_daily": 650},
-    100: {"name": "Beater (LVL 100)", "min_daily": 800, "max_daily": 1000},
-}
-
-async def add_xp(interaction_or_member, user_id, amount):
-    coins, xp, level, _, _, _, _, _, _, _, _ = get_or_create_user(user_id)
-    xp += amount
-    next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
-    leveled_up = False
-    
-    while xp >= next_level_xp:
-        level += 1
-        xp -= next_level_xp
-        next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
-        leveled_up = True
-
-    users_collection.update_one({"_id": user_id}, {"$set": {"xp": xp, "level": level}})
-
-    if leveled_up:
-        if isinstance(interaction_or_member, discord.Member):
-            member = interaction_or_member
-            channel = None
-        else:
-            member = getattr(interaction_or_member, 'user', getattr(interaction_or_member, 'author', None))
-            channel = getattr(interaction_or_member, 'channel', None)
-        
-        if member:
-            await check_level_roles(member, level)
-            if channel:
-                lvl_embed = discord.Embed(title="⚡ СИСТЕМНОЕ УВЕДОМЛЕНИЕ: ПОВЫШЕНИЕ ЭТАЖА", description=f"Поздравляем! Игрок успешно прорвался на **{level} этаж** башни Айнкрад!", color=0x00BFFF)
-                lvl_embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
-                try:
-                    await channel.send(
-                        content=f"Внимание, Система: {member.mention} устанавливает новые рекорды!", 
-                        embed=lvl_embed, 
-                        delete_after=10.0
-                    )
-                except Exception:
-                    pass
-
-@bot.event
-async def on_ready():
-    await bot.tree.sync()
-    print(f"Бот {bot.user} запущен и полностью готов к работе в Айнкраде!")
-
-@bot.event
-async def on_message(message):
-    if message.author.bot or not message.guild:
-        return
-        
-    global MAINTENANCE_MODE
-    if MAINTENANCE_MODE and not is_admin_or_mod(message.author):
-        return
-
-    # Проверка привилегий (Админы и спец-роли стаффа обходят автомод)
-    is_privileged = False
-    if message.author.guild_permissions.administrator:
-        is_privileged = True
-    else:
-        role_names = [r.name.lower() for r in message.author.roles]
-        allowed_roles = [
-            "founder", "co-founder", "moderator", "модератор", 
-            "support", "саппорт", "content maker", "sigmo brazzers"
-        ]
-        if any(role in role_names for role in allowed_roles):
-            is_privileged = True
-
-    # --- УМНАЯ АВТОМОДЕРАЦИЯ И АНТИ-СПАМ ---
-    if not is_privileged:
-        content_lower = message.content.lower().strip()
-        
-        safe_domains = [
-            "tenor.com", "giphy.com", "imgur.com", "discordapp.com", 
-            "discord.com", "pinimg.com", "klipy.com", "alphacoders.com"
-        ]
-        is_gif_or_media_link = any(domain in content_lower for domain in safe_domains) or ".gif" in content_lower
-
-        has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
-        
-        is_raw_url = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower
-        has_link = is_raw_url and not is_gif_or_media_link
-        
-        has_mass_ping = "@everyone" in message.content or "@here" in message.content
-
-        total_attachments = len(message.attachments)
-        is_mass_image_spam = total_attachments >= 3 and not is_gif_or_media_link
-        
-        is_media_channel = MEDIA_CHANNEL_ID is not None and message.channel.id == MEDIA_CHANNEL_ID
-
-        user_id = message.author.id
-        current_time = time.time()
-        is_fast_flood = False
-
-        if user_id in user_last_message_time:
-            time_diff = current_time - user_last_message_time[user_id]
-            if time_diff < 1.5:
-                is_fast_flood = True
-
-        user_last_message_time[user_id] = current_time
-
-        letters = [c for c in message.content if c.isalpha()]
-        is_caps_spam = False
-        if len(letters) > 8:
-            caps_count = sum(1 for c in letters if c.isupper())
-            if (caps_count / len(letters)) > 0.7:
-                is_caps_spam = True
-
-        violation_reason = None
-        if has_invite:
-            violation_reason = "Попытка публикации стороннего инвайта"
-        elif has_link:
-            violation_reason = f"Публикация неразрешенной ссылки (`{message.content}`)"
-        elif has_mass_ping:
-            violation_reason = "Массовый пинг (`@everyone` / `@here`)"
-        elif is_mass_image_spam and not is_media_channel:
-            violation_reason = f"Массовый спам картинками/скринами ({total_attachments} шт. в одном сообщении)"
-        elif is_fast_flood:
-            violation_reason = "Слишком быстрый флуд (превышен лимит КД 1.5 сек)"
-        elif is_caps_spam:
-            violation_reason = "Чрезмерное использование капса (Caps Lock Spam)"
-
-        if violation_reason:
-            try:
-                await message.delete()
-            except Exception as e:
-                print(f"[ОШИБКА АВТОМОДА] Не удалось удалить сообщение: {e}")
-
-            should_send_log = True
-            if user_id in log_cooldowns:
-                if current_time - log_cooldowns[user_id] < 15.0:
-                    should_send_log = False
-            
-            if should_send_log:
-                log_cooldowns[user_id] = current_time
-                log_channel = message.guild.get_channel(AUTO_MOD_LOG_CHANNEL_ID)
-                if log_channel:
-                    created_at = discord.utils.format_dt(message.author.created_at, style='R')
-                    log_embed = discord.Embed(
-                        title="⚠️ КАРДИНАЛ: НОВЫЙ ОТЧЕТ АВТОМОДА",
-                        color=0xE74C3C
-                    )
-                    log_embed.set_thumbnail(url=message.author.display_avatar.url)
-                    log_embed.add_field(name="👤 Пользователь", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
-                    log_embed.add_field(name="📅 Аккаунт создан", value=created_at, inline=True)
-                    log_embed.add_field(name="📂 Канал", value=message.channel.mention, inline=True)
-                    log_embed.add_field(name="⚡ Причина", value=f"```yaml\n{violation_reason}\n```", inline=False)
-                    log_embed.add_field(name="💬 Нарушение", value=f"```text\n{message.content if message.content else '[Медиа / Вложение]'}\n```", inline=False)
-                    log_embed.set_footer(text="Aincrad Security Shield • Сообщение удалено")
-                    try:
-                        await log_channel.send(embed=log_embed)
-                    except Exception:
-                        pass
-            return 
-
-    # Начисление опыта за чистое сообщение
-    await add_xp(message, message.author.id, random.randint(2, 5))
-    await bot.process_commands(message)
 
 # --- СИСТЕМА ВОЙС-АКТИВНОСТИ (ANTI-AFK) ---
 def is_afk(voice_state):
@@ -1047,9 +377,8 @@ async def on_member_join(member: discord.Member):
     if role:
         try:
             await member.add_roles(role)
-            print(f"[СИСТЕМА] Автоматически выдана роль {role.name} новому участнику {member.name}")
-        except Exception as e:
-            print(f"[ОШИБКА] Не удалось выдать роль новичку: {e}")
+        except Exception:
+            pass
 
 # --- АДМИНСКАЯ КОМАНДА ТЕХОБСЛУЖИВАНИЯ ---
 @bot.tree.command(name="maintenance", description="[АДМИН] Включить/выключить глобальный режим техобслуживания")
@@ -1295,7 +624,7 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
 
 class DuelAcceptView(discord.ui.View):
     def __init__(self, challenger: discord.Member, target: discord.Member, amount: int):
-        super().__init__(timeout=60)
+        super().__init__(timeout=300)
         self.challenger = challenger
         self.target = target
         self.amount = amount
@@ -1359,7 +688,7 @@ async def duel(interaction: discord.Interaction, target: discord.Member, amount:
         return await interaction.response.send_message(f"❌ У противника ({target.mention}) недостаточно средств для принятия вызова!", ephemeral=True)
 
     embed = discord.Embed(title="⚔️ ВЫЗОВ НА ДУЭЛЬ", description=f"{interaction.user.mention} бросает вызов игроку {target.mention}!\n\n• **Ставка:** `{amount:,}` Колов\n• **Условия:** Победитель забирает всё.", color=0xE67E22)
-    embed.set_footer(text="У противника есть 60 секунд на принятие решения.")
+    embed.set_footer(text="У противника есть 5 минут на принятие решения.")
     await interaction.response.send_message(content=target.mention, embed=embed, view=DuelAcceptView(interaction.user, target, amount))
 
 @bot.tree.command(name="dice", description="Бросить игральные кости против системы (Мин. ставка: 50)")
@@ -1703,140 +1032,234 @@ async def settitle(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=SetTitleSelect(titles), ephemeral=True)
 
 
-# --- ГИЛЬДИИ С ПОЛНЫМ УПРАВЛЕНИЕМ И КАЗНОЙ ---
+# =====================================================================
+# --- ГИЛЬДИИ С ПОЛНЫМ УПРАВЛЕНИЕМ, ЛОГАМИ И ИНВАЙТАМИ ---
+# =====================================================================
 
-class GuildDepositModal(discord.ui.Modal, title="Пополнение казны гильдии"):
+class GuildDepositModal(discord.ui.Modal, title="Пополнение казны"):
     amount = discord.ui.TextInput(label="Сумма в Колах", placeholder="1000", max_length=10)
-    
     def __init__(self, guild_name):
         super().__init__()
         self.guild_name = guild_name
-
     async def on_submit(self, interaction: discord.Interaction):
-        try: 
-            val = int(self.amount.value)
-        except ValueError: 
-            return await interaction.response.send_message("❌ Неверный формат суммы!", ephemeral=True)
-            
-        if val <= 0: 
-            return await interaction.response.send_message("❌ Сумма должна быть больше нуля!", ephemeral=True)
-        
-        coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
-        if coins < val: 
-            return await interaction.response.send_message("❌ У вас недостаточно средств для такого взноса в казну!", ephemeral=True)
-        
+        try: val = int(self.amount.value)
+        except ValueError: return await interaction.response.send_message("❌ Ошибка формата!", ephemeral=True)
+        if val <= 0: return await interaction.response.send_message("❌ Сумма > 0!", ephemeral=True)
+        coins, *_ = get_or_create_user(interaction.user.id)
+        if coins < val: return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
         users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -val}})
         guilds_collection.update_one({"guild_name": self.guild_name}, {"$inc": {"bank": val}})
-        await interaction.response.send_message(f"✅ Вы успешно внесли **{val:,}** Колов в общую казну гильдии **{self.guild_name}**!", ephemeral=True)
+        await interaction.response.send_message(f"✅ Внесено **{val:,}** Колов!", ephemeral=True)
+
+class GuildSetFeeModal(discord.ui.Modal, title="Настройка цены за вход"):
+    fee_input = discord.ui.TextInput(label="Цена (0 = бесплатно)", placeholder="500", max_length=10)
+    def __init__(self, guild_name):
+        super().__init__()
+        self.guild_name = guild_name
+    async def on_submit(self, interaction: discord.Interaction):
+        try: val = int(self.fee_input.value)
+        except ValueError: return await interaction.response.send_message("❌ Ошибка формата!", ephemeral=True)
+        if val < 0: return await interaction.response.send_message("❌ Цена не может быть < 0!", ephemeral=True)
+        guilds_collection.update_one({"guild_name": self.guild_name}, {"$set": {"entry_fee": val}})
+        await interaction.response.send_message(f"✅ Цена за вход: **{val:,} Колов**.", ephemeral=True)
+
+class GuildInviteAcceptView(discord.ui.View):
+    def __init__(self, guild_name, target_id):
+        super().__init__(timeout=300)
+        self.guild_name = guild_name
+        self.target_id = target_id
+    @discord.ui.button(label="Принять", style=discord.ButtonStyle.green, emoji="🤝")
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.target_id: return await interaction.response.send_message("❌ Не для вас!", ephemeral=True)
+        g_data = guilds_collection.find_one({"guild_name": self.guild_name})
+        if not g_data: return await interaction.response.send_message("❌ Гильдия удалена.", ephemeral=True)
+        coins, _, _, _, _, _, _, _, user_g, *_ = get_or_create_user(interaction.user.id)
+        if user_g: return await interaction.response.send_message("❌ Вы уже в гильдии!", ephemeral=True)
+        fee = g_data.get('entry_fee', 0)
+        if coins < fee: return await interaction.response.send_message(f"❌ Нужно {fee:,} Колов для входа.", ephemeral=True)
+        users_collection.update_one({"_id": interaction.user.id}, {"$set": {"guild_id": self.guild_name}, "$inc": {"coins": -fee}})
+        if fee > 0: guilds_collection.update_one({"guild_name": self.guild_name}, {"$inc": {"bank": fee}})
+        for c in self.children: c.disabled = True
+        embed = interaction.message.embeds[0]
+        embed.color, embed.title, embed.description = 0x2ECC71, "✅ ПРИНЯТО", f"{interaction.user.mention} вступил в **{self.guild_name}**!"
+        await interaction.response.edit_message(embed=embed, view=self)
+    @discord.ui.button(label="Отклонить", style=discord.ButtonStyle.red, emoji="❌")
+    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.target_id: return await interaction.response.send_message("❌ Не для вас!", ephemeral=True)
+        for c in self.children: c.disabled = True
+        embed = interaction.message.embeds[0]
+        embed.color, embed.title, embed.description = 0xE74C3C, "❌ ОТКЛОНЕНО", f"{interaction.user.mention} отказался."
+        await interaction.response.edit_message(embed=embed, view=self)
+
+class GuildInviteModal(discord.ui.Modal, title="Пригласить игрока"):
+    uid_input = discord.ui.TextInput(label="ID пользователя", max_length=25)
+    def __init__(self, guild_name):
+        super().__init__()
+        self.guild_name = guild_name
+    async def on_submit(self, interaction: discord.Interaction):
+        try: target_id = int(self.uid_input.value.strip())
+        except ValueError: return await interaction.response.send_message("❌ Неверный ID!", ephemeral=True)
+        target_user = interaction.guild.get_member(target_id)
+        if not target_user or target_user.bot: return await interaction.response.send_message("❌ Игрок не найден или бот.", ephemeral=True)
+        embed = discord.Embed(title="📨 ПРИГЛАШЕНИЕ", description=f"{interaction.user.mention} зовет вас в **{self.guild_name}**!", color=0x9B59B6)
+        await interaction.channel.send(content=target_user.mention, embed=embed, view=GuildInviteAcceptView(self.guild_name, target_id))
+        await interaction.response.send_message("✅ Отправлено в чат!", ephemeral=True)
+
+class GuildLogsView(discord.ui.View):
+    def __init__(self, guild_name, requests):
+        super().__init__(timeout=120)
+        self.guild_name, self.requests, self.index = guild_name, requests, 0
+        self.update_btn()
+    def update_btn(self):
+        self.prev_btn.disabled = self.index == 0
+        self.next_btn.disabled = self.index >= len(self.requests) - 1
+        if not self.requests: self.accept_btn.disabled = self.reject_btn.disabled = True
+    def get_embed(self):
+        if not self.requests: return discord.Embed(title="📋 ЛОГИ", description="Заявок нет.", color=0x95A5A6)
+        req = self.requests[self.index]
+        return discord.Embed(title="📋 ЗАЯВКА", description=f"<@{req['user_id']}> хочет вступить.\nЗаявка {self.index + 1} из {len(self.requests)}", color=0xF1C40F)
+    @discord.ui.button(label="Принять", style=discord.ButtonStyle.green, emoji="✅", row=0)
+    async def accept_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        req, g_data = self.requests[self.index], guilds_collection.find_one({"guild_name": self.guild_name})
+        uid, fee = req["user_id"], g_data.get('entry_fee', 0)
+        coins, _, _, _, _, _, _, _, user_g, *_ = get_or_create_user(uid)
+        guild_requests_collection.delete_one({"_id": req["_id"]})
+        if user_g or coins < fee:
+            await interaction.response.send_message("❌ Игрок уже в гильдии или нет денег. Заявка удалена.", ephemeral=True)
+        else:
+            users_collection.update_one({"_id": uid}, {"$set": {"guild_id": self.guild_name}, "$inc": {"coins": -fee}})
+            if fee > 0: guilds_collection.update_one({"guild_name": self.guild_name}, {"$inc": {"bank": fee}})
+            await interaction.response.send_message(f"✅ Игрок <@{uid}> принят!", ephemeral=True)
+        self.requests.pop(self.index)
+        if self.index > 0: self.index -= 1
+        self.update_btn()
+        await interaction.message.edit(embed=self.get_embed(), view=self)
+    @discord.ui.button(label="Отклонить", style=discord.ButtonStyle.red, emoji="❌", row=0)
+    async def reject_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild_requests_collection.delete_one({"_id": self.requests[self.index]["_id"]})
+        await interaction.response.send_message("🗑️ Заявка отклонена.", ephemeral=True)
+        self.requests.pop(self.index)
+        if self.index > 0: self.index -= 1
+        self.update_btn()
+        await interaction.message.edit(embed=self.get_embed(), view=self)
+    @discord.ui.button(label="⬅️", style=discord.ButtonStyle.grey, row=1)
+    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.index -= 1
+        self.update_btn()
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+    @discord.ui.button(label="➡️", style=discord.ButtonStyle.grey, row=1)
+    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.index += 1
+        self.update_btn()
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
 
 class GuildLeaderView(discord.ui.View):
     def __init__(self, guild_name):
-        super().__init__(timeout=300)
+        super().__init__(timeout=120)
         self.guild_name = guild_name
-
-    @discord.ui.button(label="Переключить набор (Откр/Закр)", style=discord.ButtonStyle.blurple, emoji="🔒")
+    @discord.ui.button(label="Набор (Откр/Закр)", style=discord.ButtonStyle.blurple, emoji="🔒", row=0)
     async def toggle_private(self, interaction: discord.Interaction, button: discord.ui.Button):
         g = guilds_collection.find_one({"guild_name": self.guild_name})
-        if not g: return await interaction.response.send_message("❌ Ошибка гильдии.", ephemeral=True)
-        
         new_status = not g.get("is_private", False)
         guilds_collection.update_one({"guild_name": self.guild_name}, {"$set": {"is_private": new_status}})
-        status_str = "🔒 ЗАКРЫТ (вход ограничен)" if new_status else "🔓 ОТКРЫТ (свободный набор)"
-        await interaction.response.send_message(f"Статус гильдии изменен: теперь набор **{status_str}**.", ephemeral=True)
+        await interaction.response.send_message(f"Набор теперь: **{'ЗАКРЫТ' if new_status else 'ОТКРЫТ'}**.", ephemeral=True)
+    @discord.ui.button(label="Цена входа", style=discord.ButtonStyle.green, emoji="💰", row=0)
+    async def set_fee(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GuildSetFeeModal(self.guild_name))
+    @discord.ui.button(label="Инвайт в чат", style=discord.ButtonStyle.secondary, emoji="📨", row=1)
+    async def invite_player(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GuildInviteModal(self.guild_name))
+    @discord.ui.button(label="Логи (Заявки)", style=discord.ButtonStyle.secondary, emoji="📋", row=1)
+    async def view_logs(self, interaction: discord.Interaction, button: discord.ui.Button):
+        reqs = list(guild_requests_collection.find({"guild_name": self.guild_name, "type": "application"}))
+        view = GuildLogsView(self.guild_name, reqs)
+        await interaction.response.send_message(embed=view.get_embed(), view=view, ephemeral=True)
 
-class GuildCreateModal(discord.ui.Modal, title="Регистрация новой гильдии"):
-    guild_name = discord.ui.TextInput(label="Название гильдии", placeholder="KoB", max_length=30)
-
+class GuildCreateModal(discord.ui.Modal, title="Создание гильдии"):
+    guild_name = discord.ui.TextInput(label="Название", max_length=30)
     async def on_submit(self, interaction: discord.Interaction):
-        uid = interaction.user.id
-        name = self.guild_name.value.strip()
-        _, _, _, _, _, _, _, _, user_g, _, _ = get_or_create_user(uid)
-        if user_g: 
-            return await interaction.response.send_message("❌ Вы уже состоите в другой гильдии!", ephemeral=True)
-
-        price = 25000
-        coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(uid)
-        if coins < price: 
-            return await interaction.response.send_message("❌ Для создания гильдии требуется накопить **25,000** Колов!", ephemeral=True)
-        
-        if guilds_collection.find_one({"guild_name": name}): 
-            return await interaction.response.send_message("❌ Гильдия с таким названием уже существует в мире Айнкрада!", ephemeral=True)
-
+        uid, name, price = interaction.user.id, self.guild_name.value.strip(), 25000
+        coins, *_ = get_or_create_user(uid)
+        user_g = get_or_create_user(uid)[8]
+        if user_g: return await interaction.response.send_message("❌ Вы уже в гильдии!", ephemeral=True)
+        if coins < price: return await interaction.response.send_message("❌ Нужно 25,000 Колов!", ephemeral=True)
+        if guilds_collection.find_one({"guild_name": name}): return await interaction.response.send_message("❌ Имя занято!", ephemeral=True)
         users_collection.update_one({"_id": uid}, {"$inc": {"coins": -price}, "$set": {"guild_id": name}})
-        guilds_collection.insert_one({"guild_name": name, "leader_id": uid, "bank": 0, "level": 1, "is_private": False})
-        await interaction.response.send_message(f"🏰 Гильдия **{name}** успешно создана! Вы назначены её лидером.", ephemeral=True)
+        guilds_collection.insert_one({"guild_name": name, "leader_id": uid, "bank": 0, "level": 1, "is_private": False, "entry_fee": 0})
+        await interaction.response.send_message(f"🏰 Гильдия **{name}** создана!", ephemeral=True)
+
+class GuildJoinModal(discord.ui.Modal, title="Вступление"):
+    g_name_input = discord.ui.TextInput(label="Название гильдии", max_length=30)
+    async def on_submit(self, interaction: discord.Interaction):
+        target_g = self.g_name_input.value.strip()
+        g_data = guilds_collection.find_one({"guild_name": {"$regex": f"^{target_g}$", "$options": "i"}})
+        if not g_data: return await interaction.response.send_message("❌ Не найдена!", ephemeral=True)
+        coins, *_ = get_or_create_user(interaction.user.id)
+        user_g = get_or_create_user(interaction.user.id)[8]
+        if user_g: return await interaction.response.send_message("❌ Вы уже в гильдии!", ephemeral=True)
+        fee = g_data.get('entry_fee', 0)
+        if coins < fee: return await interaction.response.send_message(f"❌ Вход стоит {fee:,} Колов.", ephemeral=True)
+        if g_data.get('is_private'):
+            guild_requests_collection.update_one({"user_id": interaction.user.id, "guild_name": g_data["guild_name"]}, {"$set": {"type": "application"}}, upsert=True)
+            await interaction.response.send_message(f"✅ Заявка отправлена лидеру.", ephemeral=True)
+        else:
+            users_collection.update_one({"_id": interaction.user.id}, {"$set": {"guild_id": g_data["guild_name"]}, "$inc": {"coins": -fee}})
+            if fee > 0: guilds_collection.update_one({"guild_name": g_data["guild_name"]}, {"$inc": {"bank": fee}})
+            await interaction.response.send_message(f"🎉 Вы вступили в **{g_data['guild_name']}**!", ephemeral=True)
 
 class GuildMainView(discord.ui.View):
     def __init__(self, user_id):
         super().__init__(timeout=300)
         self.user_id = user_id
-        _, _, _, _, _, _, _, _, self.g_name, _, _ = get_or_create_user(user_id)
-
-    @discord.ui.button(label="Создать гильдию (25k)", style=discord.ButtonStyle.green, emoji="🏰")
+        self.g_name = get_or_create_user(user_id)[8]
+    @discord.ui.button(label="Создать (25k)", style=discord.ButtonStyle.green, emoji="🏰", row=0)
     async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(GuildCreateModal())
-
-    @discord.ui.button(label="Информация", style=discord.ButtonStyle.blurple, emoji="🛡️")
+    @discord.ui.button(label="Вступить", style=discord.ButtonStyle.blurple, emoji="🤝", row=0)
+    async def join_guild(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.g_name: return await interaction.response.send_message("❌ Вы уже в гильдии!", ephemeral=True)
+        await interaction.response.send_modal(GuildJoinModal())
+    @discord.ui.button(label="Информация", style=discord.ButtonStyle.blurple, emoji="🛡️", row=0)
     async def info(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self.g_name: 
-            return await interaction.response.send_message("❌ Вы не состоите ни в одной гильдии!", ephemeral=True)
-            
+        if not self.g_name: return await interaction.response.send_message("❌ Вы не в гильдии!", ephemeral=True)
         g_data = guilds_collection.find_one({"guild_name": self.g_name})
         members = list(users_collection.find({"guild_id": self.g_name}))
-        members_str = ", ".join([f"<@{m['_id']}>" for m in members]) if members else "Пусто"
-
-        embed = discord.Embed(title=f"🛡️ СТАТУС ГИЛЬДИИ: {self.g_name}", description="Официальные данные объединения игроков", color=0x9B59B6)
-        embed.add_field(name="👑 Лидер гильдии", value=f"<@{g_data['leader_id']}>", inline=False)
+        m_str = ", ".join([f"<@{m['_id']}>" for m in members]) if members else "Пусто"
+        embed = discord.Embed(title=f"🛡️ ГИЛЬДИЯ: {self.g_name}", color=0x9B59B6)
+        embed.add_field(name="👑 Лидер", value=f"<@{g_data['leader_id']}>", inline=False)
         embed.add_field(name="💰 Казна", value=f"```fix\n{g_data.get('bank', 0):,} Колов\n```", inline=True)
-        embed.add_field(name="🔒 Набор", value=f"```yaml\n{'Закрытый' if g_data.get('is_private') else 'Открытый'}\n```", inline=True)
-        embed.add_field(name=f"👥 Участники ({len(members)})", value=members_str, inline=False)
-        embed.set_footer(text="Aincrad Guild System")
+        embed.add_field(name="🎟️ Цена входа", value=f"```fix\n{g_data.get('entry_fee', 0):,} Колов\n```", inline=True)
+        embed.add_field(name=f"👥 Участники ({len(members)})", value=m_str, inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @discord.ui.button(label="Пополнить казну", style=discord.ButtonStyle.grey, emoji="💰")
+    @discord.ui.button(label="Пополнить", style=discord.ButtonStyle.grey, emoji="💰", row=1)
     async def deposit(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self.g_name: 
-            return await interaction.response.send_message("❌ Вы не состоите в гильдии.", ephemeral=True)
+        if not self.g_name: return await interaction.response.send_message("❌ Вы не в гильдии.", ephemeral=True)
         await interaction.response.send_modal(GuildDepositModal(self.g_name))
-
-    @discord.ui.button(label="Панель лидера", style=discord.ButtonStyle.grey, emoji="⚙️")
+    @discord.ui.button(label="Панель лидера", style=discord.ButtonStyle.grey, emoji="⚙️", row=1)
     async def manage(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self.g_name: 
-            return await interaction.response.send_message("❌ Вы не состоите в гильдии.", ephemeral=True)
-        g_data = guilds_collection.find_one({"guild_name": self.g_name})
-        if g_data['leader_id'] != interaction.user.id: 
-            return await interaction.response.send_message("❌ Эта панель доступна только лидеру гильдии!", ephemeral=True)
-        await interaction.response.send_message("⚙️ Панель управления гильдией:", view=GuildLeaderView(self.g_name), ephemeral=True)
-
-    @discord.ui.button(label="Покинуть гильдию", style=discord.ButtonStyle.red, emoji="🚪")
+        if not self.g_name: return await interaction.response.send_message("❌ Вы не в гильдии.", ephemeral=True)
+        if guilds_collection.find_one({"guild_name": self.g_name})['leader_id'] != interaction.user.id: 
+            return await interaction.response.send_message("❌ Доступно только лидеру!", ephemeral=True)
+        await interaction.response.send_message("⚙️ Панель лидера:", view=GuildLeaderView(self.g_name), ephemeral=True)
+    @discord.ui.button(label="Покинуть", style=discord.ButtonStyle.red, emoji="🚪", row=1)
     async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self.g_name: 
-            return await interaction.response.send_message("❌ Вы не состоите в гильдии.", ephemeral=True)
-            
+        if not self.g_name: return await interaction.response.send_message("❌ Вы не в гильдии.", ephemeral=True)
         g_data = guilds_collection.find_one({"guild_name": self.g_name})
         users_collection.update_one({"_id": interaction.user.id}, {"$set": {"guild_id": None}})
-        
         if g_data['leader_id'] == interaction.user.id:
-            new_member = users_collection.find_one({"guild_id": self.g_name, "_id": {"$ne": interaction.user.id}})
+            new_member = users_collection.find_one({"guild_id": self.g_name})
             if new_member: 
                 guilds_collection.update_one({"guild_name": self.g_name}, {"$set": {"leader_id": new_member["_id"]}})
-                await interaction.response.send_message(f"🚪 Вы покинули гильдию. Новым лидером назначен <@{new_member['_id']}>.", ephemeral=True)
+                await interaction.response.send_message(f"🚪 Вы ушли. Лидер теперь <@{new_member['_id']}>.", ephemeral=True)
             else: 
                 guilds_collection.delete_one({"guild_name": self.g_name})
-                await interaction.response.send_message("🚪 Вы покинули гильдию. В ней не осталось участников, она распущена.", ephemeral=True)
-        else:
-            await interaction.response.send_message("🚪 Вы успешно покинули гильдию.", ephemeral=True)
+                await interaction.response.send_message("🚪 Гильдия распущена.", ephemeral=True)
+        else: await interaction.response.send_message("🚪 Вы покинули гильдию.", ephemeral=True)
 
-@bot.tree.command(name="guild", description="Открыть интерактивную панель управления гильдиями")
+@bot.tree.command(name="guild", description="Управление гильдиями")
 @check_maintenance()
 async def guild_menu(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🏰 УПРАВЛЕНИЕ ГИЛЬДИЯМИ АЙНКРАДА", 
-        description="Объединяйте усилия, создавайте кланы, развивайте общую казну.\n\nИспользуйте кнопки ниже для взаимодействия:", 
-        color=0x9B59B6
-    )
-    embed.add_field(name="💰 Стоимость создания", value="`25,000` Колов", inline=True)
-    embed.add_field(name="⭐ Возможности", value="Казна, статус, совместный прогресс", inline=True)
+    embed = discord.Embed(title="🏰 ГИЛЬДИИ АЙНКРАДА", description="Используйте кнопки ниже для взаимодействия:", color=0x9B59B6)
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 
@@ -1968,7 +1391,6 @@ class AuctionPagingView(discord.ui.View):
                 
         await interaction.response.send_message(f"🎉 Вы успешно приобрели роль **{item['role_name']}** за **{item['price']:,} Колов**!", ephemeral=True)
         
-        # Обновляем список лотов после покупки
         self.items = list(auction_collection.find())
         max_pages = max(0, (len(self.items) - 1) // self.per_page)
         if self.page > max_pages:
@@ -2019,7 +1441,7 @@ class AuctionMainView(discord.ui.View):
             return await interaction.response.send_message("❌ У вас нет кастомных ролей для продажи!", ephemeral=True)
         await interaction.response.send_message("Выберите роль для выставления на аукцион:", view=SellRoleSelect(user_roles), ephemeral=True)
 
-@bot.tree.command(name="auction", description="Открыть глоба аукцион кастомных ролей")
+@bot.tree.command(name="auction", description="Открыть глобальный аукцион кастомных ролей")
 @check_maintenance()
 async def auction(interaction: discord.Interaction):
     embed = discord.Embed(
@@ -2154,6 +1576,7 @@ async def resetdb(interaction: discord.Interaction):
     custom_roles_collection.delete_many({})
     titles_collection.delete_many({})
     auction_collection.delete_many({})
+    guild_requests_collection.delete_many({})
     await interaction.response.send_message("☢️ Внимание: Облачная база данных полностью очищена!", ephemeral=True)
 
 
