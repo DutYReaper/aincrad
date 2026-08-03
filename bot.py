@@ -24,6 +24,7 @@ guilds_collection = db.guilds
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.voice_states = True # ВАЖНО: Включено для отслеживания войс-активности
 
 # Оптимизация памяти для хостинга
 bot = commands.Bot(
@@ -35,6 +36,8 @@ bot = commands.Bot(
 
 # Глобальный флаг режима техобслуживания
 MAINTENANCE_MODE = False
+# Словарь для хранения сессий голосовых каналов
+voice_sessions = {}
 
 def get_or_create_user(user_id):
     user = users_collection.find_one({"_id": user_id})
@@ -50,10 +53,11 @@ def get_or_create_user(user_id):
             "last_rob": 0.0,
             "streak": 0,
             "guild_id": None,
-            "special_title": "Отсутствует"
+            "special_title": "Отсутствует",
+            "voice_time": 0.0 # Новое поле для хранения времени в войсе (в секундах)
         }
         users_collection.insert_one(new_user)
-        return 100, 0, 1, 0.0, 0.0, 0.0, 0.0, 0, None, 'Отсутствует'
+        return 100, 0, 1, 0.0, 0.0, 0.0, 0.0, 0, None, 'Отсутствует', 0.0
     
     return (
         user.get("coins", 100),
@@ -65,7 +69,8 @@ def get_or_create_user(user_id):
         user.get("last_rob", 0.0),
         user.get("streak", 0),
         user.get("guild_id", None),
-        user.get("special_title", "Отсутствует")
+        user.get("special_title", "Отсутствует"),
+        user.get("voice_time", 0.0)
     )
 
 def is_admin_or_mod(member: discord.Member):
@@ -138,8 +143,8 @@ ROLES_MAPPING = {
     100: {"name": "Beater (LVL 100)", "min_daily": 800, "max_daily": 1000},
 }
 
-async def add_xp(interaction, user_id, amount):
-    coins, xp, level, _, _, _, _, _, _, _ = get_or_create_user(user_id)
+async def add_xp(interaction_or_member, user_id, amount):
+    coins, xp, level, _, _, _, _, _, _, _, _ = get_or_create_user(user_id)
     xp += amount
     next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
     leveled_up = False
@@ -153,18 +158,20 @@ async def add_xp(interaction, user_id, amount):
     users_collection.update_one({"_id": user_id}, {"$set": {"xp": xp, "level": level}})
 
     if leveled_up:
-        # Корректно подхватываем пользователя и от слеш-команд, и от обычных сообщений
-        member = getattr(interaction, 'user', getattr(interaction, 'author', None))
+        # Проверяем, передан ли нам Message/Interaction или сам Member
+        if isinstance(interaction_or_member, discord.Member):
+            member = interaction_or_member
+            channel = None
+        else:
+            member = getattr(interaction_or_member, 'user', getattr(interaction_or_member, 'author', None))
+            channel = getattr(interaction_or_member, 'channel', None)
         
         if member:
             await check_level_roles(member, level)
-            lvl_embed = discord.Embed(title="⚡ СИСТЕМНОЕ УВЕДОМЛЕНИЕ: ПОВЫШЕНИЕ ЭТАЖА", description=f"Поздравляем! Игрок успешно прорвался на **{level} этаж** башни Айнкрад!", color=0x00BFFF)
-            lvl_embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
-            
-            channel = getattr(interaction, 'channel', None)
             if channel:
+                lvl_embed = discord.Embed(title="⚡ СИСТЕМНОЕ УВЕДОМЛЕНИЕ: ПОВЫШЕНИЕ ЭТАЖА", description=f"Поздравляем! Игрок успешно прорвался на **{level} этаж** башни Айнкрад!", color=0x00BFFF)
+                lvl_embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
                 try:
-                    # Параметр delete_after=10.0 заставит сообщение исчезнуть через 10 секунд (имитация dismiss)
                     await channel.send(
                         content=f"Внимание, Система: {member.mention} устанавливает новые рекорды!", 
                         embed=lvl_embed, 
@@ -187,6 +194,28 @@ async def on_message(message):
         return
     await add_xp(message, message.author.id, random.randint(2, 5))
     await bot.process_commands(message)
+
+# --- СИСТЕМА ВОЙС-АКТИВНОСТИ ---
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if member.bot: return
+    # Игрок зашел в канал
+    if before.channel is None and after.channel is not None:
+        voice_sessions[member.id] = time.time()
+    # Игрок вышел из канала
+    elif before.channel is not None and after.channel is None:
+        if member.id in voice_sessions:
+            join_time = voice_sessions.pop(member.id)
+            duration = time.time() - join_time
+            
+            # Расчет наград: 50 Колов и 30 XP за каждый полный час (начисляется пропорционально)
+            hours = duration / 3600
+            earned_coins = int(hours * 50)
+            earned_xp = int(hours * 30)
+            
+            users_collection.update_one({"_id": member.id}, {"$inc": {"voice_time": duration, "coins": earned_coins}})
+            if earned_xp > 0:
+                await add_xp(member, member.id, earned_xp)
 
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -218,7 +247,7 @@ async def maintenance(interaction: discord.Interaction):
 @check_maintenance()
 async def balance(interaction: discord.Interaction, member: discord.Member = None):
     target = member or interaction.user
-    coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(target.id)
+    coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(target.id)
     embed = discord.Embed(title="🌐 БАНКОВСКИЙ СЧЕТ АЙНКРАДА", color=0x00BFFF)
     embed.set_thumbnail(url=target.display_avatar.url)
     embed.add_field(name="💳 Владелец счета", value=f"{target.mention}", inline=False)
@@ -230,20 +259,53 @@ async def balance(interaction: discord.Interaction, member: discord.Member = Non
 @check_maintenance()
 async def profile(interaction: discord.Interaction, member: discord.Member = None):
     target = member or interaction.user
-    coins, xp, level, _, _, _, _, streak, guild_id, special_title = get_or_create_user(target.id)
+    coins, xp, level, _, _, _, _, streak, guild_id, special_title, voice_time = get_or_create_user(target.id)
     next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
     progress = int((xp / next_level_xp) * 10) if next_level_xp > 0 else 0
     bar = "🟩" * progress + "⬛" * (10 - progress)
 
-    embed = discord.Embed(title=f"🛡️ ИГРОВОЙ ПРОФИЛЬ: {target.display_name}", color=0xFFD700)
+    vh = int(voice_time // 3600)
+    vm = int((voice_time % 3600) // 60)
+
+    embed = discord.Embed(title=f"🛡️ ИГРОВОЙ ПРОФИЛЬ: {target.display_name}", color=0x00BFFF)
     embed.set_thumbnail(url=target.display_avatar.url)
+    
     embed.add_field(name="⚔️ Этаж башни", value=f"```yaml\n{level}\n```", inline=True)
-    embed.add_field(name="🪙 Капитал", value=f"```yaml\n{coins:,} Колов\n```", inline=True)
+    embed.add_field(name="🪙 Капитал", value=f"```fix\n{coins:,} Колов\n```", inline=True)
     embed.add_field(name="🔥 Стрик входов", value=f"```yaml\n{streak} дн.\n```", inline=True)
-    embed.add_field(name="🏰 Гильдия", value=f"```yaml\n{guild_id if guild_id else 'Нет гильдии'}\n```", inline=False)
-    embed.add_field(name="✨ Активный титул", value=f"```yaml\n{special_title}\n```", inline=False)
+    
+    embed.add_field(name="🎙️ Часы в Voice", value=f"```yaml\n{vh} ч. {vm} м.\n```", inline=True)
+    embed.add_field(name="🏰 Гильдия", value=f"```yaml\n{guild_id if guild_id else 'Нет гильдии'}\n```", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True) # Пустое поле для выравнивания
+    
+    embed.add_field(name="✨ Активный титул", value=f"```fix\n{special_title}\n```", inline=False)
     embed.add_field(name="📊 Прогресс опыта (XP)", value=f"{xp} / {next_level_xp} XP\n{bar}", inline=False)
     embed.set_footer(text="Aincrad Status Management System")
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="leaderboard", description="Посмотреть глобальный топ игроков Айнкрада")
+@app_commands.choices(category=[
+    app_commands.Choice(name="Топ по Этажам (Уровню)", value="level"),
+    app_commands.Choice(name="Топ по Капиталу (Колы)", value="coins"),
+    app_commands.Choice(name="Топ по Войс-Активности", value="voice")
+])
+@check_maintenance()
+async def leaderboard(interaction: discord.Interaction, category: str = "level"):
+    if category == "level":
+        top = list(users_collection.find().sort([("level", -1), ("xp", -1)]).limit(10))
+        title = "🏆 ТОП-10: ПРОХОДЦЫ БАШНИ (ЭТАЖИ)"
+        desc = "\n".join([f"`#{i}` <@{u['_id']}> — **{u.get('level', 1)} этаж**" for i, u in enumerate(top, 1)])
+    elif category == "coins":
+        top = list(users_collection.find().sort("coins", -1).limit(10))
+        title = "💰 ТОП-10: БОГАТЕЙШИЕ ИГРОКИ"
+        desc = "\n".join([f"`#{i}` <@{u['_id']}> — **{u.get('coins', 0):,} Колов**" for i, u in enumerate(top, 1)])
+    else:
+        top = list(users_collection.find().sort("voice_time", -1).limit(10))
+        title = "🎙️ ТОП-10: ВОЙС-АКТИВНОСТЬ"
+        desc = "\n".join([f"`#{i}` <@{u['_id']}> — **{int(u.get('voice_time', 0)//3600)} ч. {int((u.get('voice_time', 0)%3600)//60)} м.**" for i, u in enumerate(top, 1)])
+
+    embed = discord.Embed(title=title, description=desc if top else "Таблица пуста.", color=0x00BFFF)
+    embed.set_footer(text="Aincrad Global Leaderboard")
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="pay", description="Совершить межбанковский перевод Колов другому игроку")
@@ -252,7 +314,7 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
     if amount <= 0 or member.id == interaction.user.id:
         return await interaction.response.send_message("❌ Некорректная операция! Нельзя переводить средства самому себе или указывать нулевую сумму.", ephemeral=True)
     
-    sender_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    sender_coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
     if sender_coins < amount:
         return await interaction.response.send_message("❌ Ошибка перевода: на вашем счете недостаточно средств!", ephemeral=True)
 
@@ -260,7 +322,7 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
     users_collection.update_one({"_id": member.id}, {"$inc": {"coins": amount}})
 
-    embed = discord.Embed(title="💸 МЕЖБАНКОВСКИЙ ПЕРЕВОД УСПЕШЕН", color=0x00FF00)
+    embed = discord.Embed(title="💸 МЕЖБАНКОВСКИЙ ПЕРЕВОД УСПЕШЕН", color=0x00BFFF)
     embed.description = f"Со счета успешно списано и переведено **{amount:,} Колов** в пользу игрока {member.mention}."
     embed.set_footer(text="Безопасная транзакция Aincrad Network")
     await interaction.response.send_message(embed=embed)
@@ -270,7 +332,7 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
 async def daily(interaction: discord.Interaction):
     user_id = interaction.user.id
     current_time = time.time()
-    coins, _, level, last_daily, _, _, _, streak, _, _ = get_or_create_user(user_id)
+    coins, _, level, last_daily, _, _, _, streak, _, _, _ = get_or_create_user(user_id)
 
     if current_time - last_daily < 86400:
         left = int(86400 - (current_time - last_daily))
@@ -302,7 +364,7 @@ async def daily(interaction: discord.Interaction):
 async def work(interaction: discord.Interaction):
     user_id = interaction.user.id
     current_time = time.time()
-    _, _, level, _, last_work, _, _, _, _, _ = get_or_create_user(user_id)
+    _, _, level, _, last_work, _, _, _, _, _, _ = get_or_create_user(user_id)
 
     if current_time - last_work < 7200:
         left = int(7200 - (current_time - last_work))
@@ -325,7 +387,7 @@ async def work(interaction: discord.Interaction):
 async def crime(interaction: discord.Interaction):
     user_id = interaction.user.id
     current_time = time.time()
-    coins, _, level, _, _, last_crime, _, _, _, _ = get_or_create_user(user_id)
+    coins, _, level, _, _, last_crime, _, _, _, _, _ = get_or_create_user(user_id)
 
     if current_time - last_crime < 14400:
         left = int(14400 - (current_time - last_crime))
@@ -366,12 +428,12 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
         return await interaction.response.send_message(f"🛡️ Игрок {member.mention} защищен элитным статусом иммунитета!", ephemeral=True)
 
     current_time = time.time()
-    att_coins, _, _, _, _, _, att_last_rob, _, _, _ = get_or_create_user(attacker.id)
+    att_coins, _, _, _, _, _, att_last_rob, _, _, _, _ = get_or_create_user(attacker.id)
     if current_time - att_last_rob < 10800:
         left = int(10800 - (current_time - att_last_rob))
         return await interaction.response.send_message(f"⏳ Следующая попытка ограбления будет доступна через {left // 3600}ч {(left % 3600) // 60}м!", ephemeral=True)
 
-    target_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(member.id)
+    target_coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(member.id)
     
     if target_coins < 500:
         return await interaction.response.send_message(f"❌ У игрока {member.mention} слишком мало средств (меньше 500 Колов).", ephemeral=True)
@@ -407,7 +469,7 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
 
     await interaction.edit_original_response(embed=embed_res)
 
-# --- АЗАРТНЫЕ ИГРЫ И ДУЭЛЬ (С ИСПРАВЛЕННОЙ РАБОЧЕЙ ГИФКОЙ И ЕЁ УДАЛЕНИЕМ) ---
+# --- АЗАРТНЫЕ ИГРЫ И ДУЭЛЬ ---
 
 class DuelAcceptView(discord.ui.View):
     def __init__(self, challenger: discord.Member, target: discord.Member, amount: int):
@@ -425,13 +487,12 @@ class DuelAcceptView(discord.ui.View):
             child.disabled = True
         await interaction.response.edit_message(view=self)
 
-        c_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(self.challenger.id)
-        t_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(self.target.id)
+        c_coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(self.challenger.id)
+        t_coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(self.target.id)
 
         if c_coins < self.amount or t_coins < self.amount:
             return await interaction.followup.send("❌ У одного из участников больше нет нужной суммы на счете!", ephemeral=True)
 
-        # Ставим гифку СТОЛКНОВЕНИЯ КЛИНКОВ по прямой ссылке
         embed_loading = discord.Embed(title="⚔️ АРЕНА ДУЭЛЕЙ АЙНКРАДА", description=f"Скрещены клинки между {self.challenger.mention} и {self.target.mention}!\nСтавка матча: **{self.amount:,} Колов**.", color=0xE67E22)
         embed_loading.set_image(url="https://giffiles.alphacoders.com/131/131044.gif")
         msg = await interaction.followup.send(embed=embed_loading)
@@ -443,7 +504,6 @@ class DuelAcceptView(discord.ui.View):
         users_collection.update_one({"_id": winner.id}, {"$inc": {"coins": self.amount}})
         users_collection.update_one({"_id": loser.id}, {"$inc": {"coins": -self.amount}})
 
-        # Результат без гифки (картинка сбрасывается в None, гифка полностью убирается)
         embed_res = discord.Embed(title="⚔️ ИТОГ СМЕРТЕЛЬНОГО ПОЕДИНКА", color=0x3498DB)
         embed_res.description = f"🏆 **Победитель дуэли:** {winner.mention}!\nЗабирает ставку в размере **{self.amount:,} Колов** у {loser.mention}."
 
@@ -468,8 +528,8 @@ async def duel(interaction: discord.Interaction, target: discord.Member, amount:
     if amount < 50:
         return await interaction.response.send_message("❌ Минимальная ставка для дуэли составляет **50 Колов**!", ephemeral=True)
 
-    my_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
-    target_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(target.id)
+    my_coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    target_coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(target.id)
 
     if my_coins < amount:
         return await interaction.response.send_message("❌ У вас недостаточно средств для выставления такой ставки!", ephemeral=True)
@@ -486,7 +546,7 @@ async def dice(interaction: discord.Interaction, amount: int):
     if not is_admin_or_mod(interaction.user) and amount < 50:
         return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
         
-    coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
     if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств на балансе!", ephemeral=True)
 
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
@@ -524,7 +584,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
     if not is_admin_or_mod(interaction.user) and amount < 50:
         return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
         
-    coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
     if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств на балансе!", ephemeral=True)
 
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
@@ -555,7 +615,7 @@ async def roulette(interaction: discord.Interaction, amount: int):
     if not is_admin_or_mod(interaction.user) and amount < 50:
         return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
         
-    coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
     if coins < amount: return await interaction.response.send_message("❌ Недостаточно средств на балансе!", ephemeral=True)
 
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
@@ -581,7 +641,7 @@ async def roulette(interaction: discord.Interaction, amount: int):
     await add_xp(interaction, interaction.user.id, random.randint(10, 20))
 
 
-# --- МАГАЗИН И УПРАВЛЕНИЕ РОЛЯМИ / ТИТУЛАМИ (РАСШИРЕННЫЙ BAGGY ФОРМАТ) ---
+# --- МАГАЗИН И УПРАВЛЕНИЕ РОЛЯМИ / ТИТУЛАМИ ---
 
 class CustomRoleModal(discord.ui.Modal, title="Создание кастомной роли"):
     role_name = discord.ui.TextInput(label="Название роли", placeholder="Темный Страж", max_length=50)
@@ -638,7 +698,7 @@ class ShopButtonsView(discord.ui.View):
             return await interaction.response.send_message("❌ У вас уже активирован этот статус!", ephemeral=True)
         
         price = 15000
-        coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+        coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
         if coins < price: return await interaction.response.send_message("❌ Недостаточно средств! Требуется 15,000 Колов.", ephemeral=True)
         
         users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -price}})
@@ -651,14 +711,14 @@ class ShopButtonsView(discord.ui.View):
         if count >= 2:
             return await interaction.response.send_message("❌ Достигнут лимит кастомных ролей (максимум 2)!", ephemeral=True)
         
-        coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+        coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
         if coins < 10000: return await interaction.response.send_message("❌ Недостаточно средств! Требуется 10,000 Колов.", ephemeral=True)
         await interaction.response.send_modal(CustomRoleModal(10000))
 
     @discord.ui.button(label="Кастомный титул (5,000)", style=discord.ButtonStyle.grey, emoji="👑")
     async def buy_title(self, interaction: discord.Interaction, button: discord.ui.Button):
         price = 5000
-        coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+        coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
         if coins < price: return await interaction.response.send_message("❌ Недостаточно средств! Требуется 5,000 Колов.", ephemeral=True)
         await interaction.response.send_modal(CustomTitleModal(5000))
 
@@ -733,7 +793,7 @@ class EditRoleSelect(discord.ui.View):
 @bot.tree.command(name="editrole", description="Изменить цвет и название своей кастомной роли (3,000 Колов)")
 @check_maintenance()
 async def editrole(interaction: discord.Interaction):
-    coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
     if coins < 3000:
         return await interaction.response.send_message("❌ Для редактирования требуется минимум 3,000 Колов!", ephemeral=True)
 
@@ -777,7 +837,7 @@ class DeleteRoleSelect(discord.ui.View):
 @bot.tree.command(name="deleterole", description="Полностью удалить свою кастомную роль с сервера (5,000 Колов)")
 @check_maintenance()
 async def deleterole(interaction: discord.Interaction):
-    coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+    coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
     if coins < 5000:
         return await interaction.response.send_message("❌ Для удаления роли требуется 5,000 Колов!", ephemeral=True)
 
@@ -816,15 +876,6 @@ async def settitle(interaction: discord.Interaction):
     embed = discord.Embed(title="👑 ВЫБОР АКТИВНОГО ТИТУЛА", description="Выберите титул, который будет отображаться в вашем `/profile`:", color=0xFFD700)
     await interaction.response.send_message(embed=embed, view=SetTitleSelect(titles), ephemeral=True)
 
-@bot.tree.command(name="leaderboard", description="Посмотреть глобальный топ-10 сильнейших игроков Айнкрада")
-@check_maintenance()
-async def leaderboard(interaction: discord.Interaction):
-  top = list(users_collection.find().sort([("level", -1), ("coins", -1)]).limit(10))
-  embed = discord.Embed(title="🏆 ТАБЛИЦА ЛИДЕРОВ АЙНКРАДА: ТОП-10", color=0xFFD700)
-  embed.description = "\n".join([f"`#{i}` <@{u['_id']}> — **{u.get('level', 1)} этаж** | `{u.get('coins', 0):,}` Колов" for i, u in enumerate(top, 1)]) if top else "Таблица лидеров пока пуста."
-  embed.set_footer(text="Рейтинг формируется по уровню этажа и общему капиталу")
-  await interaction.response.send_message(embed=embed)
-
 
 # --- ГИЛЬДИИ С ПОЛНЫМ УПРАВЛЕНИЕМ И КАЗНОЙ ---
 
@@ -844,7 +895,7 @@ class GuildDepositModal(discord.ui.Modal, title="Пополнение казны
         if val <= 0: 
             return await interaction.response.send_message("❌ Сумма должна быть больше нуля!", ephemeral=True)
         
-        coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+        coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
         if coins < val: 
             return await interaction.response.send_message("❌ У вас недостаточно средств для такого взноса в казну!", ephemeral=True)
         
@@ -871,12 +922,12 @@ class GuildCreateModal(discord.ui.Modal, title="Регистрация ново�
     async def on_submit(self, interaction: discord.Interaction):
         uid = interaction.user.id
         name = self.guild_name.value.strip()
-        _, _, _, _, _, _, _, _, user_g, _ = get_or_create_user(uid)
+        _, _, _, _, _, _, _, _, user_g, _, _ = get_or_create_user(uid)
         if user_g: 
             return await interaction.response.send_message("❌ Вы уже состоите в другой гильдии!", ephemeral=True)
 
         price = 25000
-        coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(uid)
+        coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(uid)
         if coins < price: 
             return await interaction.response.send_message("❌ Для создания гильдии требуется накопить **25,000** Колов!", ephemeral=True)
         
@@ -891,7 +942,7 @@ class GuildMainView(discord.ui.View):
     def __init__(self, user_id):
         super().__init__(timeout=60)
         self.user_id = user_id
-        _, _, _, _, _, _, _, _, self.g_name, _ = get_or_create_user(user_id)
+        _, _, _, _, _, _, _, _, self.g_name, _, _ = get_or_create_user(user_id)
 
     @discord.ui.button(label="Создать гильдию (25k)", style=discord.ButtonStyle.green, emoji="🏰")
     async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1032,7 +1083,7 @@ class AuctionBuySelect(discord.ui.View):
         if interaction.user.id == item["seller_id"]: 
             return await interaction.response.send_message("❌ Нельзя покупать собственные лоты!", ephemeral=True)
             
-        buyer_coins, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
+        buyer_coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
         if buyer_coins < item["price"]: 
             return await interaction.response.send_message("❌ У вас недостаточно средств!", ephemeral=True)
             
@@ -1135,6 +1186,56 @@ async def auction(interaction: discord.Interaction):
         color=0xFFD700
     )
     await interaction.response.send_message(embed=embed, view=AuctionMainView())
+
+
+# --- СИСТЕМА НОВОСТЕЙ И СТРИМОВ ---
+
+class NewsModal(discord.ui.Modal, title="Создание системной новости"):
+    news_title = discord.ui.TextInput(label="Заголовок новости", placeholder="СИСТЕМНОЕ ОБНОВЛЕНИЕ", max_length=100)
+    news_text = discord.ui.TextInput(label="Основной текст", style=discord.TextStyle.paragraph, placeholder="Добавил пару фишек...\n\n| 🔻 Роли...")
+    news_gif = discord.ui.TextInput(label="Ссылка на GIF/Картинку", required=False, placeholder="https://media.tenor.com/...")
+    news_color = discord.ui.TextInput(label="HEX Цвет (без #)", default="00BFFF", max_length=6)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try: color_val = int(self.news_color.value, 16)
+        except: color_val = 0x00BFFF
+
+        embed = discord.Embed(
+            title=f"────── ┌ 📢 {self.news_title.value.upper()} ┐ ──────", 
+            description=f"\n{self.news_text.value}\n", 
+            color=color_val
+        )
+        if self.news_gif.value:
+            embed.set_image(url=self.news_gif.value)
+        
+        await interaction.channel.send(content="@everyone", embed=embed)
+        await interaction.response.send_message("✅ Новость успешно опубликована!", ephemeral=True)
+
+@bot.tree.command(name="setup_news", description="[АДМИН] Красиво опубликовать системную новость в канал")
+async def setup_news(interaction: discord.Interaction):
+    if not is_admin_or_mod(interaction.user): 
+        return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
+    await interaction.response.send_modal(NewsModal())
+
+@bot.tree.command(name="stream", description="[АДМИН] Объявить о начале стрима на Twitch")
+async def stream(interaction: discord.Interaction):
+    if not is_admin_or_mod(interaction.user): 
+        return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
+    
+    embed = discord.Embed(
+        title="🔴 ПРЯМОЙ ЭФИР НА TWITCH",
+        description=(
+            "**Йоу, стрим запущен! Залетайте!**\n\n"
+            "Стример - **@Koro'L hikka** и Brother - **@Тимур**.\n"
+            "Заходите, будет очень весело и атмосферно!\n\n"
+            "🔗 **[КЛИКАЙ СЮДА И ЗАЛЕТАЙ НА СТРИМ](https://www.twitch.tv/treihaolvl31)**"
+        ),
+        color=0x9146FF
+    )
+    embed.set_image(url="https://media.tenor.com/PZcK_wQfGgcAAAAC/sao-kirito.gif") 
+    
+    await interaction.channel.send(content="@everyone Ребята, переходите на стрим!", embed=embed)
+    await interaction.response.send_message("✅ Анонс стрима отправлен!", ephemeral=True)
 
 
 # --- ПОЛНЫЙ НАБОР АДМИНСКИХ ЧИТ-КОМАНД ---
@@ -1287,7 +1388,10 @@ class IdeaModal(discord.ui.Modal, title="Предложить идею для с
 async def idea(interaction: discord.Interaction):
     await interaction.response.send_modal(IdeaModal())
 
-# --- СИСТЕМА ВЕРИФИКАЦИИ (РУЧНАЯ ПРОВЕРКА В ГОЛОСЕ) ---
+# --- СИСТЕМА ВЕРИФИКАЦИИ И DOCS-ЛОГИРОВАНИЯ ---
+
+# ⚠️ ВАЖНО: Впиши сюда ID закрытого канала для блатного стаффа (логов верификации)
+DOCS_CHANNEL_ID = 1533682208487903483
 
 @bot.tree.command(name="setup_verify", description="[АДМИН] Установить сообщение с инструкцией по верификации")
 async def setup_verify(interaction: discord.Interaction):
@@ -1323,7 +1427,6 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
     has_perms = interaction.user.guild_permissions.administrator
     if not has_perms:
         role_names = [r.name.lower() for r in interaction.user.roles]
-        # Бот ищет роли по названию (в нижнем регистре для надежности)
         if any(r in role_names for r in ["moderator", "модератор", "support", "саппорт", "founder", "co-founder"]):
             has_perms = True
 
@@ -1350,9 +1453,23 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
         )
         embed.set_thumbnail(url=member.display_avatar.url)
         
-        # ephemeral=True делает сообщение исчезающим (видит только автор команды)
         await interaction.response.send_message(embed=embed, ephemeral=True)
-        
+
+        # Отправка DOCS в закрытый канал для стаффа
+        docs_channel = interaction.guild.get_channel(DOCS_CHANNEL_ID)
+        if docs_channel:
+            docs_embed = discord.Embed(title="📁 DOCS: ИДЕНТИФИКАЦИЯ ИГРОКА", color=0x2B2D31)
+            docs_embed.set_thumbnail(url=member.display_avatar.url)
+            docs_embed.add_field(name="Пользователь", value=f"{member.mention}\n`{member.id}`", inline=True)
+            docs_embed.add_field(name="Выданный статус", value=f"**{gender}**", inline=True)
+            docs_embed.add_field(name="Саппорт / Модер", value=interaction.user.mention, inline=False)
+            
+            created_at = discord.utils.format_dt(member.created_at, style='F')
+            docs_embed.add_field(name="Аккаунт создан", value=created_at, inline=False)
+            docs_embed.add_field(name="Discord Sensor (Логи)", value=f"[Перейти к профилю](https://discord.id/?prefill={member.id})", inline=False)
+            
+            await docs_channel.send(embed=docs_embed)
+            
     except Exception as e:
         await interaction.response.send_message(f"❌ Ошибка доступа: бот не может выдать роль (возможно, роль бота в настройках ниже выдаваемой роли). Подробности: {e}", ephemeral=True)
 
