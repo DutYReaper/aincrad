@@ -225,13 +225,21 @@ async def on_message(message):
     if not is_privileged:
         content_lower = message.content.lower().strip()
         
-        has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
-        has_link = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower
-        has_mass_ping = "@everyone" in message.content or "@here" in message.content
-
-        # Проверка гифок и медиа-ссылок (Tenor, Giphy, Imgur и т.д.)
-        safe_domains = ["tenor.com", "giphy.com", "imgur.com", "discordapp.com", "discord.com", "pinimg.com"]
+        # 1. Сначала определяем безопасные медиа-домены (с новыми добавлениями)
+        safe_domains = [
+            "tenor.com", "giphy.com", "imgur.com", "discordapp.com", 
+            "discord.com", "pinimg.com", "klipy.com", "alphacoders.com"
+        ]
         is_gif_or_media_link = any(domain in content_lower for domain in safe_domains) or ".gif" in content_lower
+
+        # 2. Проверяем инвайты
+        has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
+        
+        # 3. Фиксируем ссылку, ТОЛЬКО ЕСЛИ она НЕ является безопасной гифкой/картинкой
+        is_raw_url = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower
+        has_link = is_raw_url and not is_gif_or_media_link
+        
+        has_mass_ping = "@everyone" in message.content or "@here" in message.content
 
         total_attachments = len(message.attachments)
         
@@ -1337,7 +1345,7 @@ class AuctionMainView(discord.ui.View):
             return await interaction.response.send_message("❌ У вас нет кастомных ролей для продажи!", ephemeral=True)
         await interaction.response.send_message("Выберите роль для выставления на аукцион:", view=SellRoleSelect(user_roles), ephemeral=True)
 
-@bot.tree.command(name="auction", description="Открыть глобальный аукцион кастомных ролей")
+@bot.tree.command(name="auction", description="Открыть глоба аукцион кастомных ролей")
 @check_maintenance()
 async def auction(interaction: discord.Interaction):
     embed = discord.Embed(
