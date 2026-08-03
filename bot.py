@@ -153,14 +153,25 @@ async def add_xp(interaction, user_id, amount):
     users_collection.update_one({"_id": user_id}, {"$set": {"xp": xp, "level": level}})
 
     if leveled_up:
-        member = getattr(interaction, 'user', None)
+        # Корректно подхватываем пользователя и от слеш-команд, и от обычных сообщений
+        member = getattr(interaction, 'user', getattr(interaction, 'author', None))
+        
         if member:
             await check_level_roles(member, level)
             lvl_embed = discord.Embed(title="⚡ СИСТЕМНОЕ УВЕДОМЛЕНИЕ: ПОВЫШЕНИЕ ЭТАЖА", description=f"Поздравляем! Игрок успешно прорвался на **{level} этаж** башни Айнкрад!", color=0x00BFFF)
             lvl_embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+            
             channel = getattr(interaction, 'channel', None)
             if channel:
-                await channel.send(content=f"Внимание, Система: {member.mention} устанавливает новые рекорды!", embed=lvl_embed)
+                try:
+                    # Параметр delete_after=10.0 заставит сообщение исчезнуть через 10 секунд (имитация dismiss)
+                    await channel.send(
+                        content=f"Внимание, Система: {member.mention} устанавливает новые рекорды!", 
+                        embed=lvl_embed, 
+                        delete_after=10.0
+                    )
+                except Exception:
+                    pass
 
 @bot.event
 async def on_ready():
