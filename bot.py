@@ -1570,5 +1570,115 @@ async def setup_ranks(interaction: discord.Interaction):
     await interaction.channel.send(embed=embed)
     await interaction.response.send_message("✅ Информационное сообщение о рангах успешно установлено в канал.", ephemeral=True)
 
+# Словари для отслеживания времени последнего сообщения и дубликатов (для защиты от флуда)
+user_last_message_time = {}
+user_last_message_content = {}
+
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild:
+        return
+        
+    global MAINTENANCE_MODE
+    if MAINTENANCE_MODE and not is_admin_or_mod(message.author):
+        return
+
+    # Получаем данные пользователя (уровень)
+    _, _, level, _, _, _, _, _, _, _, _ = get_or_create_user(message.author.id)
+    is_privileged = has_mod_or_special_role(message.author)
+
+    current_time = time.time()
+    user_id = message.author.id
+
+    # --- ТОТАЛЬНАЯ АВТОМОДЕРАЦИЯ (Срабатывает для всех, кроме исключений) ---
+    if not is_privileged:
+        content_lower = message.content.lower()
+        
+        # 1. Проверки на ссылки и инвайты
+        has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
+        has_link = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or "[" in message.content and "](" in message.content
+        has_mass_ping = "@everyone" in message.content or "@here" in message.content
+        
+        # 2. Проверка на GIF / медиа для игроков ниже 2 уровня
+        has_gif_link = level < 2 and ("tenor.com" in content_lower or "giphy.com" in content_lower or ".gif" in content_lower)
+        has_gif_attachment = level < 2 and any(
+            att.filename.lower().endswith(".gif") or (att.content_type and "gif" in att.content_type) 
+            for att in message.attachments
+        )
+        has_file_attachment = level < 2 and len(message.attachments) > 0
+
+        # 3. Анти-спам и анти-флуд проверки
+        is_fast_flood = False
+        is_duplicate = False
+        is_caps_spam = False
+
+        if user_id in user_last_message_time:
+            # Если отправляет чаще, чем 1 сообщение за 0.8 секунды — флуд
+            if current_time - user_last_message_time[user_id] < 0.8:
+                is_fast_flood = True
+
+        # Проверка на одинаковый текст
+        if user_id in user_last_message_content and message.content:
+            if user_last_message_content[user_id] == message.content and len(message.content) > 3:
+                is_duplicate = True
+
+        # Проверка на жесткий капс (если в сообщении больше 8 символов и >70% букв заглавные)
+        letters = [c for c in message.content if c.isalpha()]
+        if len(letters) > 8:
+            caps_count = sum(1 for c in letters if c.isupper())
+            if (caps_count / len(letters)) > 0.7:
+                is_caps_spam = True
+
+        # Запоминаем текущее сообщение пользователя для следующей проверки
+        user_last_message_time[user_id] = current_time
+        if message.content:
+            user_last_message_content[user_id] = message.content
+
+        violation_reason = None
+        if has_invite:
+            violation_reason = "Попытка публикации стороннего приглашения (Discord Invite)"
+        elif has_link:
+            violation_reason = "Публикация неразрешенной ссылки"
+        elif has_mass_ping:
+            violation_reason = "Массовый пинг (`@everyone` / `@here`)"
+        elif has_gif_link or has_gif_attachment or has_file_attachment:
+            violation_reason = f"Отправка медиа/файлов/GIF на {level} этаже (ограничение до 2 этажа)"
+        elif is_fast_flood:
+            violation_reason = "Слишком быстрый флуд сообщениями (Rate Limit)"
+        elif is_duplicate:
+            violation_reason = "Отправка одинаковых повторяющихся сообщений (Spam)"
+        elif is_caps_spam:
+            violation_reason = "Чрезмерное использование капса (Caps Lock Spam)"
+
+        if violation_reason:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+            log_channel = message.guild.get_channel(AUTO_MOD_LOG_CHANNEL_ID)
+            if log_channel:
+                log_embed = discord.Embed(
+                    title="🛡️ КАРДИНАЛ: СРАБОТАЛ АВТОМОД",
+                    description=(
+                        f"**Нарушитель:** {message.author.mention} (`{message.author.id}`)\n"
+                        f"**Канал:** {message.channel.mention}\n"
+                        f"**Причина:** {violation_reason}\n\n"
+                        f"**Текст сообщения:**\n```text\n{message.content if message.content else '[Медиафайл / Вложение]'}\n```"
+                    ),
+                    color=0xE74C3C
+                )
+                log_embed.set_thumbnail(url=message.author.display_avatar.url)
+                log_embed.set_footer(text="Aincrad Security Shield • Сообщение удалено")
+                try:
+                    await log_channel.send(embed=log_embed)
+                except Exception:
+                    pass
+            return
+
+    # Если всё чисто — начисляем опыт и обрабатываем команды
+    await add_xp(message, message.author.id, random.randint(2, 5))
+    await bot.process_commands(message)
+
 keep_alive()
 bot.run(os.getenv("TOKEN"))
