@@ -181,7 +181,11 @@ async def add_xp(interaction_or_member, user_id, amount):
         if member:
             await check_level_roles(member, level)
             if channel:
-                lvl_embed = discord.Embed(title="⚡ СИСТЕМНОЕ УВЕДОМЛЕНИЕ: ПОВЫШЕНИЕ ЭТАЖА", description=f"Поздравляем! Игрок успешно прорвался на **{level} этаж** башни Айнкрад!", color=0x00BFFF)
+                lvl_embed = discord.Embed(
+                    title="⚡ СИСТЕМНОЕ УВЕДОМЛЕНИЕ: ПОВЫШЕНИЕ ЭТАЖА", 
+                    description=f"Поздравляем! Игрок успешно прорвался на **{level} этаж** башни Айнкрад!", 
+                    color=0x00BFFF
+                )
                 lvl_embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
                 try:
                     await channel.send(
@@ -1105,6 +1109,70 @@ class GuildInviteModal(discord.ui.Modal, title="Пригласить игрок�
         await interaction.channel.send(content=target_user.mention, embed=embed, view=GuildInviteAcceptView(self.guild_name, target_id))
         await interaction.response.send_message("✅ Персональное приглашение отправлено в чат!", ephemeral=True)
 
+class GuildKickSelectView(discord.ui.View):
+    def __init__(self, guild_name, members_list):
+        super().__init__(timeout=180)
+        self.guild_name = guild_name
+        options = [
+            discord.SelectOption(label=m.display_name, value=str(m.id), description=f"ID: {m.id}") 
+            for m in members_list[:25]
+        ]
+        self.select = discord.ui.Select(placeholder="Выберите участника для изгнания...", options=options)
+        self.select.callback = self.select_callback
+        self.add_item(self.select)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        target_id = int(self.select.values[0])
+        if target_id == interaction.user.id:
+            return await interaction.response.send_message("❌ Нельзя изгнать самого себя!", ephemeral=True)
+            
+        g_data = guilds_collection.find_one({"guild_name": self.guild_name})
+        if g_data.get("leader_id") == target_id:
+            return await interaction.response.send_message("❌ Нельзя изгнать лидера гильдии!", ephemeral=True)
+
+        users_collection.update_one({"_id": target_id}, {"$set": {"guild_id": None}})
+        if target_id in g_data.get("co_leaders", []):
+            guilds_collection.update_one({"guild_name": self.guild_name}, {"$pull": {"co_leaders": target_id}})
+
+        embed = discord.Embed(
+            title="────── ┌ 👢 ИЗГНАНИЕ ИЗ ГИЛЬДИИ ┐ ──────",
+            description=f"Участник <@{target_id}> был успешно изгнан из гильдии **{self.guild_name}**.",
+            color=0xE74C3C
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
+class GuildCoLeaderSelectView(discord.ui.View):
+    def __init__(self, guild_name, members_list):
+        super().__init__(timeout=180)
+        self.guild_name = guild_name
+        options = [
+            discord.SelectOption(label=m.display_name, value=str(m.id), description=f"ID: {m.id}") 
+            for m in members_list[:25]
+        ]
+        self.select = discord.ui.Select(placeholder="Выберите участника в Вице-президенты...", options=options)
+        self.select.callback = self.select_callback
+        self.add_item(self.select)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        target_id = int(self.select.values[0])
+        g_data = guilds_collection.find_one({"guild_name": self.guild_name})
+        co_leaders = g_data.get("co_leaders", [])
+        
+        if target_id in co_leaders:
+            return await interaction.response.send_message("❌ Этот участник уже является вице-президентом!", ephemeral=True)
+            
+        if len(co_leaders) >= 3:
+            return await interaction.response.send_message("❌ Достигнут лимит вице-президентов (максимум 3)!", ephemeral=True)
+
+        guilds_collection.update_one({"guild_name": self.guild_name}, {"$push": {"co_leaders": target_id}})
+        
+        embed = discord.Embed(
+            title="────── ┌ 👑 НАЗНАЧЕНИЕ ВИЦЕ-ПРЕЗИДЕНТА ┐ ──────",
+            description=f"Игрок <@{target_id}> успешно назначен **Вице-президентом** гильдии **{self.guild_name}**!",
+            color=0x00BFFF
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
 class GuildLogsView(discord.ui.View):
     def __init__(self, guild_name, requests):
         super().__init__(timeout=120)
@@ -1166,7 +1234,7 @@ class GuildLeaderView(discord.ui.View):
     @discord.ui.button(label="Цена входа", style=discord.ButtonStyle.green, emoji="💰", row=0)
     async def set_fee(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(GuildSetFeeModal(self.guild_name))
-    @discord.ui.button(label="Инвайт в чат", style=discord.ButtonStyle.secondary, emoji="📨", row=1)
+    @discord.ui.button(label="Инвайт в чат", style=discord.ButtonStyle.secondary, emoji="📨", row=0)
     async def invite_player(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(GuildInviteModal(self.guild_name))
     @discord.ui.button(label="Логи (Заявки)", style=discord.ButtonStyle.secondary, emoji="📋", row=1)
@@ -1174,6 +1242,35 @@ class GuildLeaderView(discord.ui.View):
         reqs = list(guild_requests_collection.find({"guild_name": self.guild_name, "type": "application"}))
         view = GuildLogsView(self.guild_name, reqs)
         await interaction.response.send_message(embed=view.get_embed(), view=view, ephemeral=True)
+    @discord.ui.button(label="Изгнать игрока", style=discord.ButtonStyle.red, emoji="👢", row=1)
+    async def kick_player(self, interaction: discord.Interaction, button: discord.ui.Button):
+        members_data = list(users_collection.find({"guild_id": self.guild_name}))
+        members_list = [interaction.guild.get_member(m["_id"]) for m in members_data if interaction.guild.get_member(m["_id"]) and m["_id"] != interaction.user.id]
+        if not members_list:
+            return await interaction.response.send_message("❌ В вашей гильдии нет других участников для изгнания.", ephemeral=True)
+        view = GuildKickSelectView(self.guild_name, members_list)
+        embed = discord.Embed(
+            title="────── ┌ 👢 ИЗГНАНИЕ УЧАСТНИКА ┐ ──────",
+            description="Выберите участника из выпадающего списка, которого хотите изгнать из гильдии:",
+            color=0xE74C3C
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    @discord.ui.button(label="Вице-президент", style=discord.ButtonStyle.blurple, emoji="👑", row=1)
+    async def set_co_leader(self, interaction: discord.Interaction, button: discord.ui.Button):
+        g = guilds_collection.find_one({"guild_name": self.guild_name})
+        if interaction.user.id != g.get("leader_id"):
+            return await interaction.response.send_message("❌ Назначать вице-президентов может только Главный Лидер гильдии!", ephemeral=True)
+        members_data = list(users_collection.find({"guild_id": self.guild_name}))
+        members_list = [interaction.guild.get_member(m["_id"]) for m in members_data if interaction.guild.get_member(m["_id"]) and m["_id"] != interaction.user.id]
+        if not members_list:
+            return await interaction.response.send_message("❌ В вашей гильдии нет других участников.", ephemeral=True)
+        view = GuildCoLeaderSelectView(self.guild_name, members_list)
+        embed = discord.Embed(
+            title="────── ┌ 👑 НАЗНАЧЕНИЕ ЗАМЕСТИТЕЛЯ ┐ ──────",
+            description="Выберите участника из выпадающего списка, чтобы назначить его Вице-президентом:",
+            color=0x00BFFF
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 class GuildCreateModal(discord.ui.Modal, title="Создание гильдии"):
     guild_name = discord.ui.TextInput(label="Название гильдии", max_length=30)
@@ -1186,7 +1283,7 @@ class GuildCreateModal(discord.ui.Modal, title="Создание гильдии"
         if guilds_collection.find_one({"guild_name": {"$regex": f"^{name}$", "$options": "i"}}): 
             return await interaction.response.send_message("❌ Гильдия с таким названием уже существует!", ephemeral=True)
         users_collection.update_one({"_id": uid}, {"$inc": {"coins": -price}, "$set": {"guild_id": name}})
-        guilds_collection.insert_one({"guild_name": name, "leader_id": uid, "bank": 0, "level": 1, "is_private": False, "entry_fee": 0})
+        guilds_collection.insert_one({"guild_name": name, "leader_id": uid, "co_leaders": [], "bank": 0, "level": 1, "is_private": False, "entry_fee": 0})
         await interaction.response.send_message(f"🏰 Гильдия **{name}** успешно создана!", ephemeral=True)
 
 class GuildJoinSelectView(discord.ui.View):
@@ -1197,7 +1294,7 @@ class GuildJoinSelectView(discord.ui.View):
                 label=g["guild_name"], 
                 description=f"Вход: {g.get('entry_fee', 0):,} Колов | {'🔒 Закрытая' if g.get('is_private') else '🟢 Открытая'}",
                 value=g["guild_name"]
-            ) for g in guilds_list[:25] # Лимит Discord на количество опций в селекте — 25
+            ) for g in guilds_list[:25]
         ]
         self.select = discord.ui.Select(placeholder="Выберите гильдию из списка...", options=options)
         self.select.callback = self.select_callback
@@ -1246,7 +1343,11 @@ class GuildMainView(discord.ui.View):
         if not all_guilds:
             return await interaction.response.send_message("❌ На сервере еще не создано ни одной гильдии.", ephemeral=True)
         view = GuildJoinSelectView(all_guilds)
-        embed = discord.Embed(title="🤝 ВСТУПЛЕНИЕ В ГИЛЬДИЮ", description="Выберите нужную гильдию из выпадающего списка ниже:", color=0x00BFFF)
+        embed = discord.Embed(
+            title="────── ┌ 🤝 ВСТУПЛЕНИЕ В ГИЛЬДИЮ ┐ ──────",
+            description="Выберите нужную гильдию из выпадающего списка ниже:", 
+            color=0x00BFFF
+        )
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     @discord.ui.button(label="Информация", style=discord.ButtonStyle.blurple, emoji="🛡️", row=0)
     async def info(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1254,8 +1355,16 @@ class GuildMainView(discord.ui.View):
         g_data = guilds_collection.find_one({"guild_name": self.g_name})
         members = list(users_collection.find({"guild_id": self.g_name}))
         m_str = ", ".join([f"<@{m['_id']}>" for m in members]) if members else "Пусто"
-        embed = discord.Embed(title=f"🛡️ ГИЛЬДИЯ: {self.g_name}", color=0x9B59B6)
-        embed.add_field(name="👑 Лидер", value=f"<@{g_data['leader_id']}>", inline=False)
+        
+        co_leaders = g_data.get('co_leaders', [])
+        co_str = ", ".join([f"<@{cid}>" for cid in co_leaders]) if co_leaders else "Нет"
+
+        embed = discord.Embed(
+            title=f"────── ┌ 🛡️ ГИЛЬДИЯ: {self.g_name} ┐ ──────", 
+            color=0x9B59B6
+        )
+        embed.add_field(name="👑 Главный лидер", value=f"<@{g_data['leader_id']}>", inline=False)
+        embed.add_field(name="⭐ Вице-президенты", value=co_str, inline=False)
         embed.add_field(name="💰 Казна", value=f"```fix\n{g_data.get('bank', 0):,} Колов\n```", inline=True)
         embed.add_field(name="🎟️ Цена входа", value=f"```fix\n{g_data.get('entry_fee', 0):,} Колов\n```", inline=True)
         embed.add_field(name=f"👥 Участники ({len(members)})", value=m_str, inline=False)
@@ -1267,18 +1376,25 @@ class GuildMainView(discord.ui.View):
     @discord.ui.button(label="Панель лидера", style=discord.ButtonStyle.grey, emoji="⚙️", row=1)
     async def manage(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.g_name: return await interaction.response.send_message("❌ Вы не состоите в гильдии.", ephemeral=True)
-        if guilds_collection.find_one({"guild_name": self.g_name})['leader_id'] != interaction.user.id: 
-            return await interaction.response.send_message("❌ Управлять гильдией может только её лидер!", ephemeral=True)
+        g_data = guilds_collection.find_one({"guild_name": self.g_name})
+        is_leader = g_data.get('leader_id') == interaction.user.id
+        is_co_leader = interaction.user.id in g_data.get('co_leaders', [])
+        if not is_leader and not is_co_leader: 
+            return await interaction.response.send_message("❌ Управлять гильдией может только её лидер или вице-президент!", ephemeral=True)
         await interaction.response.send_message("⚙️ Панель управления гильдией:", view=GuildLeaderView(self.g_name), ephemeral=True)
     @discord.ui.button(label="Покинуть", style=discord.ButtonStyle.red, emoji="🚪", row=1)
     async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.g_name: return await interaction.response.send_message("❌ Вы не состоите в гильдии.", ephemeral=True)
         g_data = guilds_collection.find_one({"guild_name": self.g_name})
         users_collection.update_one({"_id": interaction.user.id}, {"$set": {"guild_id": None}})
+        if interaction.user.id in g_data.get("co_leaders", []):
+            guilds_collection.update_one({"guild_name": self.g_name}, {"$pull": {"co_leaders": interaction.user.id}})
         if g_data['leader_id'] == interaction.user.id:
             new_member = users_collection.find_one({"guild_id": self.g_name})
             if new_member: 
                 guilds_collection.update_one({"guild_name": self.g_name}, {"$set": {"leader_id": new_member["_id"]}})
+                if new_member["_id"] in g_data.get("co_leaders", []):
+                    guilds_collection.update_one({"guild_name": self.g_name}, {"$pull": {"co_leaders": new_member["_id"]}})
                 await interaction.response.send_message(f"🚪 Вы покинули гильдию. Новым лидером назначен <@{new_member['_id']}>.", ephemeral=True)
             else: 
                 guilds_collection.delete_one({"guild_name": self.g_name})
@@ -1288,7 +1404,11 @@ class GuildMainView(discord.ui.View):
 @bot.tree.command(name="guild", description="Управление гильдиями")
 @check_maintenance()
 async def guild_menu(interaction: discord.Interaction):
-    embed = discord.Embed(title="🏰 ГИЛЬДИИ АЙНКРАДА", description="Используйте кнопки ниже для взаимодействия:", color=0x9B59B6)
+    embed = discord.Embed(
+        title="────── ┌ 🏰 ГИЛЬДИИ АЙНКРАДА ┐ ──────", 
+        description="Используйте кнопки ниже для взаимодействия:", 
+        color=0x9B59B6
+    )
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 
@@ -1429,7 +1549,7 @@ class AuctionPagingView(discord.ui.View):
 
     def get_current_embed(self):
         embed = discord.Embed(
-            title="🏛️ ГЛОБАЛЬНЫЙ АУКЦИОН РОЛЕЙ", 
+            title="────── ┌ 🏛️ ГЛОБАЛЬНЫЙ АУКЦИОН РОЛЕЙ ┐ ──────", 
             description="Торговая площадка уникальных кастомных ролей Айнкрада.", 
             color=0xFFD700
         )
@@ -1474,7 +1594,7 @@ class AuctionMainView(discord.ui.View):
 @check_maintenance()
 async def auction(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="🏛️ ЦЕНТРАЛЬНЫЙ АУКЦИОН АЙНКРАДА", 
+        title="────── ┌ 🏛️ ЦЕНТРАЛЬНЫЙ АУКЦИОН АЙНКРАДА ┐ ──────", 
         description="Покупайте уникальные роли других игроков или выставляйте на продажу свои собственные творения.", 
         color=0xFFD700
     )
@@ -1516,7 +1636,7 @@ async def stream(interaction: discord.Interaction):
         return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
     
     embed = discord.Embed(
-        title="🔴 ПРЯМОЙ ЭФИР НА TWITCH",
+        title="────── ┌ 🔴 ПРЯМОЙ ЭФИР НА TWITCH ┐ ──────",
         description=(
             "**Йоу, стрим запущен! Залетайте!**\n\n"
             "Стример - **@Koro'L hikka** и Brother - **@Тимур**.\n"
@@ -1628,6 +1748,7 @@ class AdminIdeaView(discord.ui.View):
             return await interaction.response.send_message("❌ Ошибка: Публичный канал идей не найден.", ephemeral=True)
 
         public_embed = discord.Embed(
+            title="────── ┌ ✨ ОДОБРЕННАЯ ИДЕЯ ┐ ──────",
             description=f"**Идея:**\n{self.idea_text}\n\n**Прислал:**\n{self.author.mention}", 
             color=0x2B2D31
         )
@@ -1667,7 +1788,7 @@ class IdeaModal(discord.ui.Modal, title="Предложить идею для с
             return await interaction.response.send_message("❌ Ошибка: Канал проверки идей не найден.", ephemeral=True)
 
         embed = discord.Embed(
-            title="⏳ Новая идея на рассмотрение", 
+            title="────── ┌ ⏳ НОВАЯ ИДЕЯ ┐ ──────", 
             description=f"**От пользователя:** {interaction.user.mention}\n\n**Текст:**\n{self.idea_text.value}", 
             color=0xF1C40F
         )
@@ -1692,7 +1813,7 @@ async def setup_verify(interaction: discord.Interaction):
         return await interaction.response.send_message("❌ У вас нет прав для этой команды.", ephemeral=True)
     
     embed = discord.Embed(
-        title="🛡️ СИСТЕМА ИДЕНТИФИКАЦИИ ИГРОКОВ", 
+        title="────── ┌ 🛡️ ИДЕНТИФИКАЦИЯ ИГРОКОВ ┐ ──────", 
         description=(
             "Добро пожаловать в Айнкрад!\n\n"
             "Чтобы получить доступ к этажам сервера и начать игру, вам необходимо пройти быструю голосовую проверку.\n\n"
@@ -1731,7 +1852,7 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
             await member.remove_roles(unverified_role)
             
         embed = discord.Embed(
-            title="✅ ВЕРИФИКАЦИЯ УСПЕШНА", 
+            title="────── ┌ ✅ ВЕРИФИКАЦИЯ УСПЕШНА ┐ ──────", 
             description=f"Игрок {member.mention} прошел голосовую проверку и получил статус **{gender}**.\nРоль выдал: {interaction.user.mention}", 
             color=0x2ECC71
         )
@@ -1740,7 +1861,10 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
 
         docs_channel = interaction.guild.get_channel(DOCS_CHANNEL_ID)
         if docs_channel:
-            docs_embed = discord.Embed(title="📁 DOCS: ИДЕНТИФИКАЦИЯ ИГРОКА", color=0x2B2D31)
+            docs_embed = discord.Embed(
+                title="────── ┌ 📁 DOCС: ИДЕНТИФИКАЦИЯ ┐ ──────", 
+                color=0x2B2D31
+            )
             docs_embed.set_thumbnail(url=member.display_avatar.url)
             docs_embed.add_field(name="Пользователь", value=f"{member.mention}\n`{member.id}`", inline=True)
             docs_embed.add_field(name="Выданный статус", value=f"**{gender}**", inline=True)
@@ -1765,7 +1889,7 @@ async def setup_ranks(interaction: discord.Interaction):
         return await interaction.response.send_message("❌ У вас нет прав для этой команды.", ephemeral=True)
     
     embed = discord.Embed(
-        title="─── ┌ ⚡ СИСТЕМА ПРОХОЖДЕНИЯ БАШНИ ┐ ───", 
+        title="────── ┌ ⚡ СИСТЕМА ПРОХОЖДЕНИЯ БАШНИ ┐ ──────", 
         description=(
             "«Добро пожаловать в мир, где каждый шаг наверх приносит награду. Общайтесь в чатах и сидите в войсах, чтобы преодолевать этажи и открывать новые зоны». 🛡️\n\n"
             "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n\n"
