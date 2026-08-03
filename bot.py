@@ -41,9 +41,11 @@ MAINTENANCE_MODE = False
 voice_start_times = {} # Время начала активной фазы
 voice_accumulated = {} # Накопленное чистое время за сессию
 
-# Словари для тотальной автомодерации
+# --- СЛОВАРИ ДЛЯ АВТОМОДА ---
+user_last_message_time = {}
 user_message_timestamps = {}
 user_message_history = {}
+log_cooldowns = {} # Защита от заспамливания самого канала логов
 
 AUTO_MOD_LOG_CHANNEL_ID = 1529472394102706336
 
@@ -208,15 +210,15 @@ async def on_message(message):
     else:
         role_names = [r.name.lower() for r in message.author.roles]
         allowed_roles = [
-            "Founder", "Co-Founder", "Moderator", "модератор", 
-            "Support", "саппорт", "Content maker", "sigmo brazzers"
+            "founder", "co-founder", "moderator", "модератор", 
+            "support", "саппорт", "content maker", "sigmo brazzers"
         ]
         if any(role in role_names for role in allowed_roles):
             is_privileged = True
 
     _, _, level, _, _, _, _, _, _, _, _ = get_or_create_user(message.author.id)
 
-    # --- ЖЕСТКАЯ АВТОМОДЕРАЦИЯ И АНТИ-СПАМ ---
+    # --- УМНАЯ АВТОМОДЕРАЦИЯ И АНТИ-СПАМ ---
     if not is_privileged:
         content_lower = message.content.lower().strip()
         
@@ -233,33 +235,15 @@ async def on_message(message):
 
         user_id = message.author.id
         current_time = time.time()
-        is_flood_detected = False
-        is_garbage_spam = False
+        is_fast_flood = False
 
-        if user_id not in user_message_timestamps:
-            user_message_timestamps[user_id] = []
-            user_message_history[user_id] = []
+        # Защита от быстрого флуда: КД между сообщениями в 1.5 секунды
+        if user_id in user_last_message_time:
+            time_diff = current_time - user_last_message_time[user_id]
+            if time_diff < 1.5:
+                is_fast_flood = True
 
-        # Очищаем историю времени старше 5 секунд (как в Sapphire: >=3 сообщений за 5 сек)
-        user_message_timestamps[user_id] = [t for t in user_message_timestamps[user_id] if current_time - t < 5.0]
-        user_message_timestamps[user_id].append(current_time)
-
-        # 1. Быстрый флуд (>= 3 сообщений за 5 секунд)
-        if len(user_message_timestamps[user_id]) >= 3:
-            is_flood_detected = True
-
-        # Сохраняем текст в историю для анти-мусора
-        if message.content:
-            user_message_history[user_id].append(content_lower)
-            if len(user_message_history[user_id]) > 6:
-                user_message_history[user_id].pop(0)
-
-        # 2. Защита от медленного мусора (спам короткими бессмысленными словами подряд)
-        recent_texts = user_message_history[user_id]
-        if len(recent_texts) >= 4:
-            short_msgs_count = sum(1 for txt in recent_texts if len(txt) <= 5)
-            if short_msgs_count >= 4:
-                is_garbage_spam = True
+        user_last_message_time[user_id] = current_time
 
         # Проверка на жесткий капс (букв > 8 и >70% заглавных)
         letters = [c for c in message.content if c.isalpha()]
@@ -278,10 +262,8 @@ async def on_message(message):
             violation_reason = "Массовый пинг (`@everyone` / `@here`)"
         elif has_gif_link or has_gif_attachment or has_file_attachment:
             violation_reason = f"Отправка медиа/гифки на {level} этаже (ограничение до 2 этажа)"
-        elif is_flood_detected:
-            violation_reason = "Флуд: отправлено >= 3 сообщений за 5 секунд"
-        elif is_garbage_spam:
-            violation_reason = "Засорение чата бессмысленным мусором (спам короткими словами)"
+        elif is_fast_flood:
+            violation_reason = "Слишком быстрый флуд (превышен лимит КД 1.5 сек)"
         elif is_caps_spam:
             violation_reason = "Чрезмерное использование капса (Caps Lock Spam)"
 
@@ -291,23 +273,32 @@ async def on_message(message):
             except Exception as e:
                 print(f"[ОШИБКА АВТОМОДА] Не удалось удалить сообщение: {e}")
 
-            log_channel = message.guild.get_channel(AUTO_MOD_LOG_CHANNEL_ID)
-            if log_channel:
-                log_embed = discord.Embed(
-                    title="🛡️ КАРДИНАЛ: СРАБОТАЛ АВТОМОД",
-                    description=(
-                        f"**Нарушитель:** {message.author.mention} (`{message.author.id}`)\n"
-                        f"**Канал:** {message.channel.mention}\n"
-                        f"**Причина:** {violation_reason}\n\n"
-                        f"**Текст:**\n```text\n{message.content if message.content else '[Файл / Медиа]'}\n```"
-                    ),
-                    color=0xE74C3C
-                )
-                log_embed.set_thumbnail(url=message.author.display_avatar.url)
-                try:
-                    await log_channel.send(embed=log_embed)
-                except Exception:
-                    pass
+            # Защита канала логов от заспамливания (отправляем лог не чаще 1 раза в 15 секунд на одного юзера)
+            should_send_log = True
+            if user_id in log_cooldowns:
+                if current_time - log_cooldowns[user_id] < 15.0:
+                    should_send_log = False
+            
+            if should_send_log:
+                log_cooldowns[user_id] = current_time
+                log_channel = message.guild.get_channel(AUTO_MOD_LOG_CHANNEL_ID)
+                if log_channel:
+                    created_at = discord.utils.format_dt(message.author.created_at, style='R')
+                    log_embed = discord.Embed(
+                        title="⚠️ КАРДИНАЛ: НОВЫЙ ОТЧЕТ АВТОМОДА",
+                        color=0xE74C3C
+                    )
+                    log_embed.set_thumbnail(url=message.author.display_avatar.url)
+                    log_embed.add_field(name="👤 Пользователь", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
+                    log_embed.add_field(name="📅 Аккаунт создан", value=created_at, inline=True)
+                    log_embed.add_field(name="📂 Канал", value=message.channel.mention, inline=True)
+                    log_embed.add_field(name="⚡ Причина", value=f"```yaml\n{violation_reason}\n```", inline=False)
+                    log_embed.add_field(name="💬 Нарушение", value=f"```text\n{message.content if message.content else '[Медиа / Вложение]'}\n```", inline=False)
+                    log_embed.set_footer(text="Aincrad Security Shield • Сообщение удалено")
+                    try:
+                        await log_channel.send(embed=log_embed)
+                    except Exception:
+                        pass
             return # Стоп! Опыт не начисляется, команды не обрабатываются.
 
     # Начисление опыта за чистое сообщение и обработка команд
