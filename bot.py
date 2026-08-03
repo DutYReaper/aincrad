@@ -36,8 +36,10 @@ bot = commands.Bot(
 
 # Глобальный флаг режима техобслуживания
 MAINTENANCE_MODE = False
-# Словарь для хранения сессий голосовых каналов
-voice_sessions = {}
+
+# --- СЛОВАРИ ДЛЯ ANTI-AFK ВОЙС-СИСТЕМЫ ---
+voice_start_times = {} # Время начала активной фазы
+voice_accumulated = {} # Накопленное чистое время за сессию
 
 def get_or_create_user(user_id):
     user = users_collection.find_one({"_id": user_id})
@@ -158,7 +160,6 @@ async def add_xp(interaction_or_member, user_id, amount):
     users_collection.update_one({"_id": user_id}, {"$set": {"xp": xp, "level": level}})
 
     if leveled_up:
-        # Проверяем, передан ли нам Message/Interaction или сам Member
         if isinstance(interaction_or_member, discord.Member):
             member = interaction_or_member
             channel = None
@@ -195,27 +196,82 @@ async def on_message(message):
     await add_xp(message, message.author.id, random.randint(2, 5))
     await bot.process_commands(message)
 
-# --- СИСТЕМА ВОЙС-АКТИВНОСТИ ---
+
+# --- СИСТЕМА ВОЙС-АКТИВНОСТИ (ANTI-AFK) ---
+def is_afk(voice_state):
+    # Игрок считается АФК, если выключил микрофон ИЛИ звук (включая серверный мут)
+    return voice_state.self_mute or voice_state.mute or voice_state.self_deaf or voice_state.deaf or voice_state.afk
+
 @bot.event
 async def on_voice_state_update(member, before, after):
     if member.bot: return
-    # Игрок зашел в канал
-    if before.channel is None and after.channel is not None:
-        voice_sessions[member.id] = time.time()
-    # Игрок вышел из канала
-    elif before.channel is not None and after.channel is None:
-        if member.id in voice_sessions:
-            join_time = voice_sessions.pop(member.id)
-            duration = time.time() - join_time
+    
+    # Проверяем состояния: был ли АФК до этого и стал ли АФК сейчас
+    was_afk = before.channel is None or is_afk(before)
+    is_afk_now = after.channel is None or is_afk(after)
+    
+    # СИТУАЦИЯ А: Зашел в канал с включенным микрофоном ИЛИ размутился
+    if was_afk and not is_afk_now:
+        voice_start_times[member.id] = time.time()
+        if member.id not in voice_accumulated:
+            voice_accumulated[member.id] = 0.0
+
+    # СИТУАЦИЯ Б: Замутился/выключил наушники ИЛИ перешел в канал АФК
+    elif not was_afk and is_afk_now:
+        if member.id in voice_start_times:
+            # Считаем, сколько он просидел активным до этого момента, и плюсуем в копилку
+            session_time = time.time() - voice_start_times.pop(member.id)
+            voice_accumulated[member.id] = voice_accumulated.get(member.id, 0.0) + session_time
+
+    # СИТУАЦИЯ В: Полностью вышел из голосового канала (выдаем отчет и награду)
+    if before.channel is not None and after.channel is None:
+        # Закидываем последний кусок времени, если выходил активным
+        if member.id in voice_start_times:
+            session_time = time.time() - voice_start_times.pop(member.id)
+            voice_accumulated[member.id] = voice_accumulated.get(member.id, 0.0) + session_time
+        
+        # Достаем всё накопленное чистое время
+        total_time = voice_accumulated.pop(member.id, 0.0)
+        duration_minutes = int(total_time // 60)
+        
+        if duration_minutes < 1:
+            return # Если чистого времени меньше минуты — отчет не шлем
             
-            # Расчет наград: 50 Колов и 30 XP за каждый полный час (начисляется пропорционально)
-            hours = duration / 3600
-            earned_coins = int(hours * 50)
-            earned_xp = int(hours * 30)
-            
-            users_collection.update_one({"_id": member.id}, {"$inc": {"voice_time": duration, "coins": earned_coins}})
-            if earned_xp > 0:
-                await add_xp(member, member.id, earned_xp)
+        # Награда: 1 Кол и 1 XP за каждую чистую минуту
+        earned_coins = duration_minutes
+        earned_xp = duration_minutes
+        
+        # Записываем в базу
+        users_collection.update_one(
+            {"_id": member.id}, 
+            {
+                "$inc": {
+                    "coins": earned_coins, 
+                    "voice_time": int(total_time)
+                }
+            },
+            upsert=True
+        )
+        await add_xp(member, member.id, earned_xp)
+        
+        # Системный отчет в ЛС
+        try:
+            embed = discord.Embed(
+                title="🎙️ СИСТЕМНЫЙ ОТЧЕТ: ВОЙС-АКТИВНОСТЬ",
+                description=(
+                    f"Сеанс связи в голосовом канале завершен.\n\n"
+                    f"🪙 Заработано колов: **+{earned_coins:,}**\n"
+                    f"⚡ Получено опыта: **+{earned_xp:,} XP**\n"
+                    f"⏱️ Чистое время: **{duration_minutes} мин.**\n\n"
+                    f"*(Время с выключенным микрофоном или звуком не учитывалось системой)*"
+                ),
+                color=0x00BFFF
+            )
+            embed.set_footer(text="Cardinal Anti-AFK System")
+            await member.send(embed=embed)
+        except Exception:
+            pass
+
 
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -1318,7 +1374,7 @@ async def resetdb(interaction: discord.Interaction):
 # --- СИСТЕМА ИДЕЙ И ПРЕДЛОЖЕНИЙ С ПРЕМОДЕРАЦИЕЙ ---
 
 PUBLIC_IDEA_CHANNEL_ID = 1532592402223730739  
-ADMIN_IDEA_CHANNEL_ID = 1532719050319466610    
+ADMIN_IDEA_CHANNEL_ID = 1532719050319466610   
 
 class AdminIdeaView(discord.ui.View):
     def __init__(self, author: discord.Member, idea_text: str):
