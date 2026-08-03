@@ -1044,12 +1044,12 @@ class GuildDepositModal(discord.ui.Modal, title="Пополнение казны
     async def on_submit(self, interaction: discord.Interaction):
         try: val = int(self.amount.value)
         except ValueError: return await interaction.response.send_message("❌ Ошибка формата!", ephemeral=True)
-        if val <= 0: return await interaction.response.send_message("❌ Сумма > 0!", ephemeral=True)
+        if val <= 0: return await interaction.response.send_message("❌ Сумма должна быть больше 0!", ephemeral=True)
         coins, *_ = get_or_create_user(interaction.user.id)
         if coins < val: return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
         users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -val}})
         guilds_collection.update_one({"guild_name": self.guild_name}, {"$inc": {"bank": val}})
-        await interaction.response.send_message(f"✅ Внесено **{val:,}** Колов!", ephemeral=True)
+        await interaction.response.send_message(f"✅ Внесено **{val:,}** Колов в казну гильдии!", ephemeral=True)
 
 class GuildSetFeeModal(discord.ui.Modal, title="Настройка цены за вход"):
     fee_input = discord.ui.TextInput(label="Цена (0 = бесплатно)", placeholder="500", max_length=10)
@@ -1059,9 +1059,9 @@ class GuildSetFeeModal(discord.ui.Modal, title="Настройка цены за
     async def on_submit(self, interaction: discord.Interaction):
         try: val = int(self.fee_input.value)
         except ValueError: return await interaction.response.send_message("❌ Ошибка формата!", ephemeral=True)
-        if val < 0: return await interaction.response.send_message("❌ Цена не может быть < 0!", ephemeral=True)
+        if val < 0: return await interaction.response.send_message("❌ Цена не может быть отрицательной!", ephemeral=True)
         guilds_collection.update_one({"guild_name": self.guild_name}, {"$set": {"entry_fee": val}})
-        await interaction.response.send_message(f"✅ Цена за вход: **{val:,} Колов**.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Цена за вход в гильдию установлена: **{val:,} Колов**.", ephemeral=True)
 
 class GuildInviteAcceptView(discord.ui.View):
     def __init__(self, guild_name, target_id):
@@ -1070,40 +1070,40 @@ class GuildInviteAcceptView(discord.ui.View):
         self.target_id = target_id
     @discord.ui.button(label="Принять", style=discord.ButtonStyle.green, emoji="🤝")
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.target_id: return await interaction.response.send_message("❌ Не для вас!", ephemeral=True)
+        if interaction.user.id != self.target_id: return await interaction.response.send_message("❌ Это приглашение адресовано не вам!", ephemeral=True)
         g_data = guilds_collection.find_one({"guild_name": self.guild_name})
-        if not g_data: return await interaction.response.send_message("❌ Гильдия удалена.", ephemeral=True)
+        if not g_data: return await interaction.response.send_message("❌ Данная гильдия была распущена.", ephemeral=True)
         coins, _, _, _, _, _, _, _, user_g, *_ = get_or_create_user(interaction.user.id)
-        if user_g: return await interaction.response.send_message("❌ Вы уже в гильдии!", ephemeral=True)
+        if user_g: return await interaction.response.send_message("❌ Вы уже состоите в гильдии!", ephemeral=True)
         fee = g_data.get('entry_fee', 0)
-        if coins < fee: return await interaction.response.send_message(f"❌ Нужно {fee:,} Колов для входа.", ephemeral=True)
+        if coins < fee: return await interaction.response.send_message(f"❌ Для входа требуется **{fee:,}** Колов.", ephemeral=True)
         users_collection.update_one({"_id": interaction.user.id}, {"$set": {"guild_id": self.guild_name}, "$inc": {"coins": -fee}})
         if fee > 0: guilds_collection.update_one({"guild_name": self.guild_name}, {"$inc": {"bank": fee}})
         for c in self.children: c.disabled = True
         embed = interaction.message.embeds[0]
-        embed.color, embed.title, embed.description = 0x2ECC71, "✅ ПРИНЯТО", f"{interaction.user.mention} вступил в **{self.guild_name}**!"
+        embed.color, embed.title, embed.description = 0x2ECC71, "✅ ПРИГЛАШЕНИЕ ПРИНЯТО", f"{interaction.user.mention} официально вступил в **{self.guild_name}**!"
         await interaction.response.edit_message(embed=embed, view=self)
     @discord.ui.button(label="Отклонить", style=discord.ButtonStyle.red, emoji="❌")
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.target_id: return await interaction.response.send_message("❌ Не для вас!", ephemeral=True)
+        if interaction.user.id != self.target_id: return await interaction.response.send_message("❌ Это приглашение адресовано не вам!", ephemeral=True)
         for c in self.children: c.disabled = True
         embed = interaction.message.embeds[0]
-        embed.color, embed.title, embed.description = 0xE74C3C, "❌ ОТКЛОНЕНО", f"{interaction.user.mention} отказался."
+        embed.color, embed.title, embed.description = 0xE74C3C, "❌ ПРИГЛАШЕНИЕ ОТКЛОНЕНО", f"{interaction.user.mention} отклонил приглашение."
         await interaction.response.edit_message(embed=embed, view=self)
 
 class GuildInviteModal(discord.ui.Modal, title="Пригласить игрока"):
-    uid_input = discord.ui.TextInput(label="ID пользователя", max_length=25)
+    uid_input = discord.ui.TextInput(label="Discord ID пользователя", max_length=25)
     def __init__(self, guild_name):
         super().__init__()
         self.guild_name = guild_name
     async def on_submit(self, interaction: discord.Interaction):
         try: target_id = int(self.uid_input.value.strip())
-        except ValueError: return await interaction.response.send_message("❌ Неверный ID!", ephemeral=True)
+        except ValueError: return await interaction.response.send_message("❌ Неверный формат ID!", ephemeral=True)
         target_user = interaction.guild.get_member(target_id)
-        if not target_user or target_user.bot: return await interaction.response.send_message("❌ Игрок не найден или бот.", ephemeral=True)
-        embed = discord.Embed(title="📨 ПРИГЛАШЕНИЕ", description=f"{interaction.user.mention} зовет вас в **{self.guild_name}**!", color=0x9B59B6)
+        if not target_user or target_user.bot: return await interaction.response.send_message("❌ Пользователь не найден на сервере или это бот.", ephemeral=True)
+        embed = discord.Embed(title="📨 ПРИГЛАШЕНИЕ В ГИЛЬДИЮ", description=f"{interaction.user.mention} приглашает вас присоединиться к элитной гильдии **{self.guild_name}**!", color=0x9B59B6)
         await interaction.channel.send(content=target_user.mention, embed=embed, view=GuildInviteAcceptView(self.guild_name, target_id))
-        await interaction.response.send_message("✅ Отправлено в чат!", ephemeral=True)
+        await interaction.response.send_message("✅ Персональное приглашение отправлено в чат!", ephemeral=True)
 
 class GuildLogsView(discord.ui.View):
     def __init__(self, guild_name, requests):
@@ -1115,9 +1115,9 @@ class GuildLogsView(discord.ui.View):
         self.next_btn.disabled = self.index >= len(self.requests) - 1
         if not self.requests: self.accept_btn.disabled = self.reject_btn.disabled = True
     def get_embed(self):
-        if not self.requests: return discord.Embed(title="📋 ЛОГИ", description="Заявок нет.", color=0x95A5A6)
+        if not self.requests: return discord.Embed(title="📋 ЛОГИ ЗАЯВОК", description="Активных заявок на вступление нет.", color=0x95A5A6)
         req = self.requests[self.index]
-        return discord.Embed(title="📋 ЗАЯВКА", description=f"<@{req['user_id']}> хочет вступить.\nЗаявка {self.index + 1} из {len(self.requests)}", color=0xF1C40F)
+        return discord.Embed(title="📋 УПРАВЛЕНИЕ ЗАЯВКАМИ", description=f"Игрок <@{req['user_id']}> желает вступить в гильдию.\nЗаявка `{self.index + 1}` из `{len(self.requests)}`", color=0xF1C40F)
     @discord.ui.button(label="Принять", style=discord.ButtonStyle.green, emoji="✅", row=0)
     async def accept_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         req, g_data = self.requests[self.index], guilds_collection.find_one({"guild_name": self.guild_name})
@@ -1125,11 +1125,11 @@ class GuildLogsView(discord.ui.View):
         coins, _, _, _, _, _, _, _, user_g, *_ = get_or_create_user(uid)
         guild_requests_collection.delete_one({"_id": req["_id"]})
         if user_g or coins < fee:
-            await interaction.response.send_message("❌ Игрок уже в гильдии или нет денег. Заявка удалена.", ephemeral=True)
+            await interaction.response.send_message("❌ Игрок уже вступил в другую гильдию или у него не хватает средств. Заявка аннулирована.", ephemeral=True)
         else:
             users_collection.update_one({"_id": uid}, {"$set": {"guild_id": self.guild_name}, "$inc": {"coins": -fee}})
             if fee > 0: guilds_collection.update_one({"guild_name": self.guild_name}, {"$inc": {"bank": fee}})
-            await interaction.response.send_message(f"✅ Игрок <@{uid}> принят!", ephemeral=True)
+            await interaction.response.send_message(f"✅ Игрок <@{uid}> успешно принят в гильдию!", ephemeral=True)
         self.requests.pop(self.index)
         if self.index > 0: self.index -= 1
         self.update_btn()
@@ -1137,7 +1137,7 @@ class GuildLogsView(discord.ui.View):
     @discord.ui.button(label="Отклонить", style=discord.ButtonStyle.red, emoji="❌", row=0)
     async def reject_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild_requests_collection.delete_one({"_id": self.requests[self.index]["_id"]})
-        await interaction.response.send_message("🗑️ Заявка отклонена.", ephemeral=True)
+        await interaction.response.send_message("🗑️ Заявка игрока отклонена.", ephemeral=True)
         self.requests.pop(self.index)
         if self.index > 0: self.index -= 1
         self.update_btn()
@@ -1146,12 +1146,12 @@ class GuildLogsView(discord.ui.View):
     async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.index -= 1
         self.update_btn()
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+        await interaction.message.edit(embed=self.get_embed(), view=self)
     @discord.ui.button(label="➡️", style=discord.ButtonStyle.grey, row=1)
     async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.index += 1
         self.update_btn()
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+        await interaction.message.edit(embed=self.get_embed(), view=self)
 
 class GuildLeaderView(discord.ui.View):
     def __init__(self, guild_name):
@@ -1162,7 +1162,7 @@ class GuildLeaderView(discord.ui.View):
         g = guilds_collection.find_one({"guild_name": self.guild_name})
         new_status = not g.get("is_private", False)
         guilds_collection.update_one({"guild_name": self.guild_name}, {"$set": {"is_private": new_status}})
-        await interaction.response.send_message(f"Набор теперь: **{'ЗАКРЫТ' if new_status else 'ОТКРЫТ'}**.", ephemeral=True)
+        await interaction.response.send_message(f"🔒 Набор в гильдию теперь: **{'ЗАКРЫТ (требуется одобрение)' if new_status else 'ОТКРЫТ (свободный вход)'}**.", ephemeral=True)
     @discord.ui.button(label="Цена входа", style=discord.ButtonStyle.green, emoji="💰", row=0)
     async def set_fee(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(GuildSetFeeModal(self.guild_name))
@@ -1176,36 +1176,60 @@ class GuildLeaderView(discord.ui.View):
         await interaction.response.send_message(embed=view.get_embed(), view=view, ephemeral=True)
 
 class GuildCreateModal(discord.ui.Modal, title="Создание гильдии"):
-    guild_name = discord.ui.TextInput(label="Название", max_length=30)
+    guild_name = discord.ui.TextInput(label="Название гильдии", max_length=30)
     async def on_submit(self, interaction: discord.Interaction):
         uid, name, price = interaction.user.id, self.guild_name.value.strip(), 25000
         coins, *_ = get_or_create_user(uid)
         user_g = get_or_create_user(uid)[8]
-        if user_g: return await interaction.response.send_message("❌ Вы уже в гильдии!", ephemeral=True)
-        if coins < price: return await interaction.response.send_message("❌ Нужно 25,000 Колов!", ephemeral=True)
-        if guilds_collection.find_one({"guild_name": name}): return await interaction.response.send_message("❌ Имя занято!", ephemeral=True)
+        if user_g: return await interaction.response.send_message("❌ Вы уже состоите в гильдии!", ephemeral=True)
+        if coins < price: return await interaction.response.send_message("❌ Для создания гильдии требуется **25,000** Колов!", ephemeral=True)
+        if guilds_collection.find_one({"guild_name": {"$regex": f"^{name}$", "$options": "i"}}): 
+            return await interaction.response.send_message("❌ Гильдия с таким названием уже существует!", ephemeral=True)
         users_collection.update_one({"_id": uid}, {"$inc": {"coins": -price}, "$set": {"guild_id": name}})
         guilds_collection.insert_one({"guild_name": name, "leader_id": uid, "bank": 0, "level": 1, "is_private": False, "entry_fee": 0})
-        await interaction.response.send_message(f"🏰 Гильдия **{name}** создана!", ephemeral=True)
+        await interaction.response.send_message(f"🏰 Гильдия **{name}** успешно создана!", ephemeral=True)
 
-class GuildJoinModal(discord.ui.Modal, title="Вступление"):
-    g_name_input = discord.ui.TextInput(label="Название гильдии", max_length=30)
-    async def on_submit(self, interaction: discord.Interaction):
-        target_g = self.g_name_input.value.strip()
-        g_data = guilds_collection.find_one({"guild_name": {"$regex": f"^{target_g}$", "$options": "i"}})
-        if not g_data: return await interaction.response.send_message("❌ Не найдена!", ephemeral=True)
+class GuildJoinSelectView(discord.ui.View):
+    def __init__(self, guilds_list):
+        super().__init__(timeout=180)
+        options = [
+            discord.SelectOption(
+                label=g["guild_name"], 
+                description=f"Вход: {g.get('entry_fee', 0):,} Колов | {'🔒 Закрытая' if g.get('is_private') else '🟢 Открытая'}",
+                value=g["guild_name"]
+            ) for g in guilds_list[:25] # Лимит Discord на количество опций в селекте — 25
+        ]
+        self.select = discord.ui.Select(placeholder="Выберите гильдию из списка...", options=options)
+        self.select.callback = self.select_callback
+        self.add_item(self.select)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        target_g = self.select.values[0]
+        g_data = guilds_collection.find_one({"guild_name": target_g})
+        if not g_data: 
+            return await interaction.response.send_message("❌ Эта гильдия больше не существует.", ephemeral=True)
+            
         coins, *_ = get_or_create_user(interaction.user.id)
         user_g = get_or_create_user(interaction.user.id)[8]
-        if user_g: return await interaction.response.send_message("❌ Вы уже в гильдии!", ephemeral=True)
+        if user_g: 
+            return await interaction.response.send_message("❌ Вы уже состоите в гильдии! Сначала покиньте текущую.", ephemeral=True)
+            
         fee = g_data.get('entry_fee', 0)
-        if coins < fee: return await interaction.response.send_message(f"❌ Вход стоит {fee:,} Колов.", ephemeral=True)
+        if coins < fee: 
+            return await interaction.response.send_message(f"❌ Недостаточно средств! Вход в гильдию стоит **{fee:,}** Колов.", ephemeral=True)
+            
         if g_data.get('is_private'):
-            guild_requests_collection.update_one({"user_id": interaction.user.id, "guild_name": g_data["guild_name"]}, {"$set": {"type": "application"}}, upsert=True)
-            await interaction.response.send_message(f"✅ Заявка отправлена лидеру.", ephemeral=True)
+            guild_requests_collection.update_one(
+                {"user_id": interaction.user.id, "guild_name": g_data["guild_name"]}, 
+                {"$set": {"type": "application"}}, 
+                upsert=True
+            )
+            await interaction.response.send_message(f"✅ Набор в **{target_g}** закрытый. Ваша заявка успешно отправлена лидеру на рассмотрение!", ephemeral=True)
         else:
             users_collection.update_one({"_id": interaction.user.id}, {"$set": {"guild_id": g_data["guild_name"]}, "$inc": {"coins": -fee}})
-            if fee > 0: guilds_collection.update_one({"guild_name": g_data["guild_name"]}, {"$inc": {"bank": fee}})
-            await interaction.response.send_message(f"🎉 Вы вступили в **{g_data['guild_name']}**!", ephemeral=True)
+            if fee > 0: 
+                guilds_collection.update_one({"guild_name": g_data["guild_name"]}, {"$inc": {"bank": fee}})
+            await interaction.response.send_message(f"🎉 Вы успешно вступили в гильдию **{target_g}**!", ephemeral=True)
 
 class GuildMainView(discord.ui.View):
     def __init__(self, user_id):
@@ -1217,11 +1241,16 @@ class GuildMainView(discord.ui.View):
         await interaction.response.send_modal(GuildCreateModal())
     @discord.ui.button(label="Вступить", style=discord.ButtonStyle.blurple, emoji="🤝", row=0)
     async def join_guild(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.g_name: return await interaction.response.send_message("❌ Вы уже в гильдии!", ephemeral=True)
-        await interaction.response.send_modal(GuildJoinModal())
+        if self.g_name: return await interaction.response.send_message("❌ Вы уже состоите в гильдии!", ephemeral=True)
+        all_guilds = list(guilds_collection.find())
+        if not all_guilds:
+            return await interaction.response.send_message("❌ На сервере еще не создано ни одной гильдии.", ephemeral=True)
+        view = GuildJoinSelectView(all_guilds)
+        embed = discord.Embed(title="🤝 ВСТУПЛЕНИЕ В ГИЛЬДИЮ", description="Выберите нужную гильдию из выпадающего списка ниже:", color=0x00BFFF)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     @discord.ui.button(label="Информация", style=discord.ButtonStyle.blurple, emoji="🛡️", row=0)
     async def info(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self.g_name: return await interaction.response.send_message("❌ Вы не в гильдии!", ephemeral=True)
+        if not self.g_name: return await interaction.response.send_message("❌ Вы не состоите в гильдии!", ephemeral=True)
         g_data = guilds_collection.find_one({"guild_name": self.g_name})
         members = list(users_collection.find({"guild_id": self.g_name}))
         m_str = ", ".join([f"<@{m['_id']}>" for m in members]) if members else "Пусто"
@@ -1233,28 +1262,28 @@ class GuildMainView(discord.ui.View):
         await interaction.response.send_message(embed=embed, ephemeral=True)
     @discord.ui.button(label="Пополнить", style=discord.ButtonStyle.grey, emoji="💰", row=1)
     async def deposit(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self.g_name: return await interaction.response.send_message("❌ Вы не в гильдии.", ephemeral=True)
+        if not self.g_name: return await interaction.response.send_message("❌ Вы не состоите в гильдии.", ephemeral=True)
         await interaction.response.send_modal(GuildDepositModal(self.g_name))
     @discord.ui.button(label="Панель лидера", style=discord.ButtonStyle.grey, emoji="⚙️", row=1)
     async def manage(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self.g_name: return await interaction.response.send_message("❌ Вы не в гильдии.", ephemeral=True)
+        if not self.g_name: return await interaction.response.send_message("❌ Вы не состоите в гильдии.", ephemeral=True)
         if guilds_collection.find_one({"guild_name": self.g_name})['leader_id'] != interaction.user.id: 
-            return await interaction.response.send_message("❌ Доступно только лидеру!", ephemeral=True)
-        await interaction.response.send_message("⚙️ Панель лидера:", view=GuildLeaderView(self.g_name), ephemeral=True)
+            return await interaction.response.send_message("❌ Управлять гильдией может только её лидер!", ephemeral=True)
+        await interaction.response.send_message("⚙️ Панель управления гильдией:", view=GuildLeaderView(self.g_name), ephemeral=True)
     @discord.ui.button(label="Покинуть", style=discord.ButtonStyle.red, emoji="🚪", row=1)
     async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self.g_name: return await interaction.response.send_message("❌ Вы не в гильдии.", ephemeral=True)
+        if not self.g_name: return await interaction.response.send_message("❌ Вы не состоите в гильдии.", ephemeral=True)
         g_data = guilds_collection.find_one({"guild_name": self.g_name})
         users_collection.update_one({"_id": interaction.user.id}, {"$set": {"guild_id": None}})
         if g_data['leader_id'] == interaction.user.id:
             new_member = users_collection.find_one({"guild_id": self.g_name})
             if new_member: 
                 guilds_collection.update_one({"guild_name": self.g_name}, {"$set": {"leader_id": new_member["_id"]}})
-                await interaction.response.send_message(f"🚪 Вы ушли. Лидер теперь <@{new_member['_id']}>.", ephemeral=True)
+                await interaction.response.send_message(f"🚪 Вы покинули гильдию. Новым лидером назначен <@{new_member['_id']}>.", ephemeral=True)
             else: 
                 guilds_collection.delete_one({"guild_name": self.g_name})
-                await interaction.response.send_message("🚪 Гильдия распущена.", ephemeral=True)
-        else: await interaction.response.send_message("🚪 Вы покинули гильдию.", ephemeral=True)
+                await interaction.response.send_message("🚪 Вы покинули гильдию. Поскольку участников не осталось, гильдия была распущена.", ephemeral=True)
+        else: await interaction.response.send_message("🚪 Вы успешно покинули гильдию.", ephemeral=True)
 
 @bot.tree.command(name="guild", description="Управление гильдиями")
 @check_maintenance()
