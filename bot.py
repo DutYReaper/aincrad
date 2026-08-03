@@ -218,6 +218,10 @@ async def on_message(message):
 
     _, _, level, _, _, _, _, _, _, _, _ = get_or_create_user(message.author.id)
 
+    # Дополнительно проверяем по ролям или уровню, есть ли у юзера доступ к медиа (если уровень >= 2 или есть любая роль этажа)
+    has_tier_role = any(data["name"].lower() in [r.name.lower() for r in message.author.roles] for data in ROLES_MAPPING.values())
+    is_allowed_media = is_privileged or level >= 2 or has_tier_role
+
     # --- УМНАЯ АВТОМОДЕРАЦИЯ И АНТИ-СПАМ ---
     if not is_privileged:
         content_lower = message.content.lower().strip()
@@ -226,12 +230,12 @@ async def on_message(message):
         has_link = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower or "klipy.com" in content_lower
         has_mass_ping = "@everyone" in message.content or "@here" in message.content
         
-        has_gif_link = level < 2 and ("tenor.com" in content_lower or "giphy.com" in content_lower or ".gif" in content_lower or "klipy.com" in content_lower)
-        has_gif_attachment = level < 2 and any(
+        has_gif_link = (not is_allowed_media) and ("tenor.com" in content_lower or "giphy.com" in content_lower or ".gif" in content_lower or "klipy.com" in content_lower)
+        has_gif_attachment = (not is_allowed_media) and any(
             att.filename.lower().endswith(".gif") or (att.content_type and "gif" in att.content_type) 
             for att in message.attachments
         )
-        has_file_attachment = level < 2 and len(message.attachments) > 0
+        has_file_attachment = (not is_allowed_media) and len(message.attachments) > 0
 
         user_id = message.author.id
         current_time = time.time()
