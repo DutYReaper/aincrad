@@ -20,6 +20,313 @@ custom_roles_collection = db.custom_roles
 auction_collection = db.auction_roles
 titles_collection = db.user_titles
 guilds_collection = db.guilds
+guild_requests_collection = db.guild_requests # НОВАЯ: Коллекция для логов и заявок гильдий
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+intents.voice_states = True # ВАЖНО: Включено для отслеживания войс-активности
+
+# Оптимизация памяти для хостинга
+bot = commands.Bot(
+    command_prefix="!", 
+    intents=intents,
+    chunk_guilds_at_startup=False,
+    max_messages=10
+)
+
+# Глобальный флаг режима техобслуживания
+MAINTENANCE_MODE = False
+
+# --- НАСТРОЙКИ АВТОМОДА ДЛЯ МЕДИА ---
+MEDIA_CHANNEL_ID = None
+
+# --- СЛОВАРИ ДЛЯ ANTI-AFK И АВТОМОДЕРАЦИИ ---
+voice_start_times = {} # Время начала активной фазы
+voice_accumulated = {} # Накопленное чистое время за сессию
+
+# --- СЛОВАРИ ДЛЯ АВТОМОДА ---
+user_last_message_time = {}
+user_message_timestamps = {}
+user_message_history = {}
+log_cooldowns = {} # Защита от заспамливания самого канала логов
+
+AUTO_MOD_LOG_CHANNEL_ID = 1529472394102706336
+
+def get_or_create_user(user_id):
+    user = users_collection.find_one({"_id": user_id})
+    if user is None:
+        new_user = {
+            "_id": user_id,
+            "coins": 100,
+            "xp": 0,
+            "level": 1,
+            "last_daily": 0.0,
+            "last_work": 0.0,
+            "last_crime": 0.0,
+            "last_rob": 0.0,
+            "streak": 0,
+            "guild_id": None,
+            "special_title": "Отсутствует",
+            "voice_time": 0.0 # Новое поле для хранения времени в войсе (в секундах)
+        }
+        users_collection.insert_one(new_user)
+        return 100, 0, 1, 0.0, 0.0, 0.0, 0.0, 0, None, 'Отсутствует', 0.0
+    
+    return (
+        user.get("coins", 100),
+        user.get("xp", 0),
+        user.get("level", 1),
+        user.get("last_daily", 0.0),
+        user.get("last_work", 0.0),
+        user.get("last_crime", 0.0),
+        user.get("last_rob", 0.0),
+        user.get("streak", 0),
+        user.get("guild_id", None),
+        user.get("special_title", "Отсутствует"),
+        user.get("voice_time", 0.0)
+    )
+
+def is_admin_or_mod(member: discord.Member):
+    if member.guild_permissions.administrator:
+        return True
+    role_names = [r.name.lower() for r in member.roles]
+    # Добавлены все роли администрации Айнкрада
+    allowed_roles = ["модератор", "moderator", "администратор", "administrator", "саппорт", "support", "founder", "co-founder", "content maker", "sigmo brazzers"]
+    if any(role in role_names for role in allowed_roles):
+        return True
+    return False
+
+# ЖЕСТКИЙ ДЕКОРАТОР ПРОВЕРКИ ТЕХОБСЛУЖИВАНИЯ
+def check_maintenance():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        global MAINTENANCE_MODE
+        if MAINTENANCE_MODE and not is_admin_or_mod(interaction.user):
+            await interaction.response.send_message(
+                "🛠️ **[ SYSTEM ALERT: КАРДИНАЛ АКТИВЕН ]**\n"
+                "На сервере проводятся технические работы. Доступ к системным интерфейсам временно заблокирован.", 
+                ephemeral=True
+            )
+            return False
+        return True
+    return app_commands.check(predicate)
+
+async def check_level_roles(member: discord.Member, current_level: int):
+    highest_role_name = None
+    for req_level, data in sorted(ROLES_MAPPING.items(), reverse=True):
+        if current_level >= req_level:
+            highest_role_name = data["name"]
+            break
+            
+    if not highest_role_name:
+        return
+
+    highest_role = discord.utils.get(member.guild.roles, name=highest_role_name)
+    roles_to_remove = []
+    for req_level, data in ROLES_MAPPING.items():
+        r_name = data["name"]
+        if r_name != highest_role_name:
+            old_role = discord.utils.get(member.guild.roles, name=r_name)
+            if old_role and old_role in member.roles:
+                roles_to_remove.append(old_role)
+                
+    if roles_to_remove:
+        try:
+            await member.remove_roles(*roles_to_remove)
+        except Exception:
+            pass
+
+    if highest_role and highest_role not in member.roles:
+        try:
+            await member.add_roles(highest_role)
+            await member.send(f"🎉 Поздравляем! Вы прорвались на **{current_level} этаж** Айнкрада и получили элитный статус **{highest_role_name}**!")
+        except Exception:
+            pass
+
+ROLES_MAPPING = {
+    2: {"name": "Начало Легенды (LVL 2)", "min_daily": 60, "max_daily": 80},
+    5: {"name": "Путешественник (LVL 5)", "min_daily": 70, "max_daily": 100},
+    10: {"name": "Разведчик Рубежа (LVL 10)", "min_daily": 90, "max_daily": 130},
+    15: {"name": "Опытный Мечник (LVL 15)", "min_daily": 110, "max_daily": 150},
+    20: {"name": "Передовой Воин (LVL 20)", "min_daily": 140, "max_daily": 180},
+    30: {"name": "Закаленный Огнем (LVL 30)", "min_daily": 170, "max_daily": 220},
+    40: {"name": "Мастер клинка (LVL 40)", "min_daily": 210, "max_daily": 270},
+    50: {"name": "Герой Айнкрада (LVL 50)", "min_daily": 260, "max_daily": 340},
+    65: {"name": "Грандмастер (LVL 65)", "min_daily": 350, "max_daily": 450},
+    80: {"name": "Вершитель Судеб (LVL 80)", "min_daily": 480, "max_daily": 650},
+    100: {"name": "Beater (LVL 100)", "min_daily": 800, "max_daily": 1000},
+}
+
+async def add_xp(interaction_or_member, user_id, amount):
+    coins, xp, level, _, _, _, _, _, _, _, _ = get_or_create_user(user_id)
+    xp += amount
+    next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
+    leveled_up = False
+    
+    while xp >= next_level_xp:
+        level += 1
+        xp -= next_level_xp
+        next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
+        leveled_up = True
+
+    users_collection.update_one({"_id": user_id}, {"$set": {"xp": xp, "level": level}})
+
+    if leveled_up:
+        if isinstance(interaction_or_member, discord.Member):
+            member = interaction_or_member
+            channel = None
+        else:
+            member = getattr(interaction_or_member, 'user', getattr(interaction_or_member, 'author', None))
+            channel = getattr(interaction_or_member, 'channel', None)
+        
+        if member:
+            await check_level_roles(member, level)
+            if channel:
+                lvl_embed = discord.Embed(title="⚡ СИСТЕМНОЕ УВЕДОМЛЕНИЕ: ПОВЫШЕНИЕ ЭТАЖА", description=f"Поздравляем! Игрок успешно прорвался на **{level} этаж** башни Айнкрад!", color=0x00BFFF)
+                lvl_embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+                try:
+                    await channel.send(
+                        content=f"Внимание, Система: {member.mention} устанавливает новые рекорды!", 
+                        embed=lvl_embed, 
+                        delete_after=10.0
+                    )
+                except Exception:
+                    pass
+
+@bot.event
+async def on_ready():
+    await bot.tree.sync()
+    print(f"Бот {bot.user} запущен и полностью готов к работе в Айнкраде!")
+
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild:
+        return
+        
+    global MAINTENANCE_MODE
+    if MAINTENANCE_MODE and not is_admin_or_mod(message.author):
+        return
+
+    # Проверка привилегий
+    is_privileged = False
+    if message.author.guild_permissions.administrator:
+        is_privileged = True
+    else:
+        role_names = [r.name.lower() for r in message.author.roles]
+        allowed_roles = [
+            "founder", "co-founder", "moderator", "модератор", 
+            "support", "саппорт", "content maker", "sigmo brazzers"
+        ]
+        if any(role in role_names for role in allowed_roles):
+            is_privileged = True
+
+    # --- УМНАЯ АВТОМОДЕРАЦИЯ И АНТИ-СПАМ ---
+    if not is_privileged:
+        content_lower = message.content.lower().strip()
+        
+        safe_domains = [
+            "tenor.com", "giphy.com", "imgur.com", "discordapp.com", 
+            "discord.com", "pinimg.com", "klipy.com", "alphacoders.com"
+        ]
+        is_gif_or_media_link = any(domain in content_lower for domain in safe_domains) or ".gif" in content_lower
+
+        has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
+        
+        is_raw_url = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower
+        has_link = is_raw_url and not is_gif_or_media_link
+        
+        has_mass_ping = "@everyone" in message.content or "@here" in message.content
+        total_attachments = len(message.attachments)
+        is_mass_image_spam = total_attachments >= 3 and not is_gif_or_media_link
+        is_media_channel = MEDIA_CHANNEL_ID is not None and message.channel.id == MEDIA_CHANNEL_ID
+
+        user_id = message.author.id
+        current_time = time.time()
+        is_fast_flood = False
+
+        if user_id in user_last_message_time:
+            time_diff = current_time - user_last_message_time[user_id]
+            if time_diff < 1.5:
+                is_fast_flood = True
+
+        user_last_message_time[user_id] = current_time
+
+        letters = [c for c in message.content if c.isalpha()]
+        is_caps_spam = False
+        if len(letters) > 8:
+            caps_count = sum(1 for c in letters if c.isupper())
+            if (caps_count / len(letters)) > 0.7:
+                is_caps_spam = True
+
+        violation_reason = None
+        if has_invite:
+            violation_reason = "Попытка публикации стороннего инвайта"
+        elif has_link:
+            violation_reason = f"Публикация неразрешенной ссылки (`{message.content}`)"
+        elif has_mass_ping:
+            violation_reason = "Массовый пинг (`@everyone` / `@here`)"
+        elif is_mass_image_spam and not is_media_channel:
+            violation_reason = f"Массовый спам картинками/скринами ({total_attachments} шт. в одном сообщении)"
+        elif is_fast_flood:
+            violation_reason = "Слишком быстрый флуд (превышен лимит КД 1.5 сек)"
+        elif is_caps_spam:
+            violation_reason = "Чрезмерное использование капса (Caps Lock Spam)"
+
+        if violation_reason:
+            try:
+                await message.delete()
+            except Exception as e:
+                print(f"[ОШИБКА АВТОМОДА] Не удалось удалить сообщение: {e}")
+
+            should_send_log = True
+            if user_id in log_cooldowns:
+                if current_time - log_cooldowns[user_id] < 15.0:
+                    should_send_log = False
+            
+            if should_send_log:
+                log_cooldowns[user_id] = current_time
+                log_channel = message.guild.get_channel(AUTO_MOD_LOG_CHANNEL_ID)
+                if log_channel:
+                    created_at = discord.utils.format_dt(message.author.created_at, style='R')
+                    log_embed = discord.Embed(
+                        title="⚠️ КАРДИНАЛ: НОВЫЙ ОТЧЕТ АВТОМОДА",
+                        color=0xE74C3C
+                    )
+                    log_embed.set_thumbnail(url=message.author.display_avatar.url)
+                    log_embed.add_field(name="👤 Пользователь", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
+                    log_embed.add_field(name="📅 Аккаунт создан", value=created_at, inline=True)
+                    log_embed.add_field(name="📂 Канал", value=message.channel.mention, inline=True)
+                    log_embed.add_field(name="⚡ Причина", value=f"Привет! Я проанализировал твой масштабный код бота для Айнкрада. В нем уже реализовано множество отличных систем: экономика, гильдии, кастомные роли, аукцион, уровни и автомодерация.
+
+Главное исправление, которое я внес прямо сейчас — **очистил код от скрытых неразрывных пробелов** (символов `\xa0`). В твоем исходнике отступы были сделаны с их помощью, из-за чего Python моментально выдавал бы критическую ошибку `IndentationError` при попытке запуска. Теперь код отформатирован корректно стандартными пробелами и готов к работе.
+
+Поскольку в твоем сообщении не было указано, **какие именно** новые фичи или баги нужно было исправить в этот раз, база кода осталась оригинальной, но полностью рабочей.
+
+Вот очищенная и готовая к запуску версия:
+
+```python
+import os
+import certifi
+import random
+import time
+import asyncio
+import discord
+from pymongo import MongoClient
+from discord import app_commands
+from discord.ext import commands
+from keep_alive import keep_alive
+
+# Достаем ссылку на базу из переменных окружения
+MONGO_URI = os.getenv('MONGO_URI')
+
+# Подключаемся с поддержкой сертификатов certifi
+cluster = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+db = cluster.aincrad_data
+users_collection = db.users
+custom_roles_collection = db.custom_roles
+auction_collection = db.auction_roles
+titles_collection = db.user_titles
+guilds_collection = db.guilds
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -233,7 +540,7 @@ async def on_message(message):
         is_gif_or_media_link = any(domain in content_lower for domain in safe_domains) or ".gif" in content_lower
 
         # 2. Проверяем инвайты
-        has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
+        has_invite = "discord.gg/" in content_lower or "[discord.com/invite](https://discord.com/invite)" in content_lower or "invite.gg/" in content_lower
         
         # 3. Фиксируем ссылку, ТОЛЬКО ЕСЛИ она НЕ является безопасной гифкой/картинкой
         is_raw_url = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower
@@ -348,6 +655,355 @@ async def on_voice_state_update(member, before, after):
             voice_accumulated[member.id] = voice_accumulated.get(member.id, 0.0) + session_time
         
         total_time = voice_accumulated.pop(member.id, 0.0)
+Привет, Тимур! Я провел полный аудит твоего кода. В нем была скрытая, но очень неприятная проблема — невидимые символы (неразрывные пробелы `U+00A0`), из-за которых Python мог бы выдавать ошибку `SyntaxError`. Я полностью очистил код от них.
+
+Кроме этого, я **исправил и улучшил** следующие моменты:
+1. **Аукцион ролей:** Полностью переписал логику `AuctionPagingView`. Раньше кнопки перелистывания страниц выдавали ошибку атрибутов и ломались. Теперь пагинация и покупка работают идеально.
+2. **Защита от эксплойтов (Абуз казино):** В играх (кубики, рулетка, монетка) игроки могли ввести отрицательную ставку (например, `-5000`) и багом получать деньги. Я установил жесткий лимит на минимальную ставку (50 Колов) для всех, включая админов.
+3. **Безопасность магазина:** Добавил проверку в `/shop` на наличие роли `Неприкасаемый` на самом сервере перед тем, как списать у игрока деньги за неё. 
+4. **Увеличены тайм-ауты (UX):** Многие меню (магазин, гильдии, аукцион) закрывались ровно через 60 секунд (`timeout=60`), из-за чего кнопки переставали работать. Я увеличил время их жизни до 5 минут (`timeout=300`).
+5. **Баг с выходом из гильдии:** Исправлена ошибка, из-за которой покинувший гильдию лидер мог случайно снова назначиться лидером.
+
+Вот полностью готовый, исправленный и оптимизированный код. Ничего не забыто, все команды на месте:
+
+```python
+import os
+import certifi
+import random
+import time
+import asyncio
+import discord
+from pymongo import MongoClient
+from discord import app_commands
+from discord.ext import commands
+from keep_alive import keep_alive
+
+# Достаем ссылку на базу из переменных окружения
+MONGO_URI = os.getenv('MONGO_URI')
+
+# Подключаемся с поддержкой сертификатов certifi
+cluster = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+db = cluster.aincrad_data
+users_collection = db.users
+custom_roles_collection = db.custom_roles
+auction_collection = db.auction_roles
+titles_collection = db.user_titles
+guilds_collection = db.guilds
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+intents.voice_states = True # ВАЖНО: Включено для отслеживания войс-активности
+
+# Оптимизация памяти для хостинга
+bot = commands.Bot(
+    command_prefix="!", 
+    intents=intents,
+    chunk_guilds_at_startup=False,
+    max_messages=10
+)
+
+# Глобальный флаг режима техобслуживания
+MAINTENANCE_MODE = False
+
+# --- НАСТРОЙКИ АВТОМОДА ДЛЯ МЕДИА ---
+MEDIA_CHANNEL_ID = None
+
+# --- СЛОВАРИ ДЛЯ ANTI-AFK И АВТОМОДЕРАЦИИ ---
+voice_start_times = {} # Время начала активной фазы
+voice_accumulated = {} # Накопленное чистое время за сессию
+
+user_last_message_time = {}
+user_message_timestamps = {}
+user_message_history = {}
+log_cooldowns = {} # Защита от заспамливания самого канала логов
+
+AUTO_MOD_LOG_CHANNEL_ID = 1529472394102706336
+
+def get_or_create_user(user_id):
+    user = users_collection.find_one({"_id": user_id})
+    if user is None:
+        new_user = {
+            "_id": user_id,
+            "coins": 100,
+            "xp": 0,
+            "level": 1,
+            "last_daily": 0.0,
+            "last_work": 0.0,
+            "last_crime": 0.0,
+            "last_rob": 0.0,
+            "streak": 0,
+            "guild_id": None,
+            "special_title": "Отсутствует",
+            "voice_time": 0.0
+        }
+        users_collection.insert_one(new_user)
+        return 100, 0, 1, 0.0, 0.0, 0.0, 0.0, 0, None, 'Отсутствует', 0.0
+    
+    return (
+        user.get("coins", 100),
+        user.get("xp", 0),
+        user.get("level", 1),
+        user.get("last_daily", 0.0),
+        user.get("last_work", 0.0),
+        user.get("last_crime", 0.0),
+        user.get("last_rob", 0.0),
+        user.get("streak", 0),
+        user.get("guild_id", None),
+        user.get("special_title", "Отсутствует"),
+        user.get("voice_time", 0.0)
+    )
+
+def is_admin_or_mod(member: discord.Member):
+    if member.guild_permissions.administrator:
+        return True
+    role_names = [r.name.lower() for r in member.roles]
+    allowed_roles = ["модератор", "moderator", "администратор", "administrator", "саппорт", "support", "founder", "co-founder", "content maker", "sigmo brazzers"]
+    if any(role in role_names for role in allowed_roles):
+        return True
+    return False
+
+# ЖЕСТКИЙ ДЕКОРАТОР ПРОВЕРКИ ТЕХОБСЛУЖИВАНИЯ
+def check_maintenance():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        global MAINTENANCE_MODE
+        if MAINTENANCE_MODE and not is_admin_or_mod(interaction.user):
+            await interaction.response.send_message(
+                "🛠️ **[ SYSTEM ALERT: КАРДИНАЛ АКТИВЕН ]**\n"
+                "На сервере проводятся технические работы. Доступ к системным интерфейсам временно заблокирован.", 
+                ephemeral=True
+            )
+            return False
+        return True
+    return app_commands.check(predicate)
+
+async def check_level_roles(member: discord.Member, current_level: int):
+    highest_role_name = None
+    for req_level, data in sorted(ROLES_MAPPING.items(), reverse=True):
+        if current_level >= req_level:
+            highest_role_name = data["name"]
+            break
+            
+    if not highest_role_name:
+        return
+
+    highest_role = discord.utils.get(member.guild.roles, name=highest_role_name)
+    roles_to_remove = []
+    for req_level, data in ROLES_MAPPING.items():
+        r_name = data["name"]
+        if r_name != highest_role_name:
+            old_role = discord.utils.get(member.guild.roles, name=r_name)
+            if old_role and old_role in member.roles:
+                roles_to_remove.append(old_role)
+                
+    if roles_to_remove:
+        try:
+            await member.remove_roles(*roles_to_remove)
+        except Exception:
+            pass
+
+    if highest_role and highest_role not in member.roles:
+        try:
+            await member.add_roles(highest_role)
+            await member.send(f"🎉 Поздравляем! Вы прорвались на **{current_level} этаж** Айнкрада и получили элитный статус **{highest_role_name}**!")
+        except Exception:
+            pass
+
+ROLES_MAPPING = {
+    2: {"name": "Начало Легенды (LVL 2)", "min_daily": 60, "max_daily": 80},
+    5: {"name": "Путешественник (LVL 5)", "min_daily": 70, "max_daily": 100},
+    10: {"name": "Разведчик Рубежа (LVL 10)", "min_daily": 90, "max_daily": 130},
+    15: {"name": "Опытный Мечник (LVL 15)", "min_daily": 110, "max_daily": 150},
+    20: {"name": "Передовой Воин (LVL 20)", "min_daily": 140, "max_daily": 180},
+    30: {"name": "Закаленный Огнем (LVL 30)", "min_daily": 170, "max_daily": 220},
+    40: {"name": "Мастер клинка (LVL 40)", "min_daily": 210, "max_daily": 270},
+    50: {"name": "Герой Айнкрада (LVL 50)", "min_daily": 260, "max_daily": 340},
+    65: {"name": "Грандмастер (LVL 65)", "min_daily": 350, "max_daily": 450},
+    80: {"name": "Вершитель Судеб (LVL 80)", "min_daily": 480, "max_daily": 650},
+    100: {"name": "Beater (LVL 100)", "min_daily": 800, "max_daily": 1000},
+}
+
+async def add_xp(interaction_or_member, user_id, amount):
+    coins, xp, level, _, _, _, _, _, _, _, _ = get_or_create_user(user_id)
+    xp += amount
+    next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
+    leveled_up = False
+    
+    while xp >= next_level_xp:
+        level += 1
+        xp -= next_level_xp
+        next_level_xp = int(35 * (level ** 1.85) + 80 * level + 40)
+        leveled_up = True
+
+    users_collection.update_one({"_id": user_id}, {"$set": {"xp": xp, "level": level}})
+
+    if leveled_up:
+        if isinstance(interaction_or_member, discord.Member):
+            member = interaction_or_member
+            channel = None
+        else:
+            member = getattr(interaction_or_member, 'user', getattr(interaction_or_member, 'author', None))
+            channel = getattr(interaction_or_member, 'channel', None)
+        
+        if member:
+            await check_level_roles(member, level)
+            if channel:
+                lvl_embed = discord.Embed(title="⚡ СИСТЕМНОЕ УВЕДОМЛЕНИЕ: ПОВЫШЕНИЕ ЭТАЖА", description=f"Поздравляем! Игрок успешно прорвался на **{level} этаж** башни Айнкрад!", color=0x00BFFF)
+                lvl_embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+                try:
+                    await channel.send(
+                        content=f"Внимание, Система: {member.mention} устанавливает новые рекорды!", 
+                        embed=lvl_embed, 
+                        delete_after=10.0
+                    )
+                except Exception:
+                    pass
+
+@bot.event
+async def on_ready():
+    await bot.tree.sync()
+    print(f"Бот {bot.user} запущен и полностью готов к работе в Айнкраде!")
+
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild:
+        return
+        
+    global MAINTENANCE_MODE
+    if MAINTENANCE_MODE and not is_admin_or_mod(message.author):
+        return
+
+    # Проверка привилегий (Админы и спец-роли стаффа обходят автомод)
+    is_privileged = False
+    if message.author.guild_permissions.administrator:
+        is_privileged = True
+    else:
+        role_names = [r.name.lower() for r in message.author.roles]
+        allowed_roles = [
+            "founder", "co-founder", "moderator", "модератор", 
+            "support", "саппорт", "content maker", "sigmo brazzers"
+        ]
+        if any(role in role_names for role in allowed_roles):
+            is_privileged = True
+
+    # --- УМНАЯ АВТОМОДЕРАЦИЯ И АНТИ-СПАМ ---
+    if not is_privileged:
+        content_lower = message.content.lower().strip()
+        
+        safe_domains = [
+            "tenor.com", "giphy.com", "imgur.com", "discordapp.com", 
+            "discord.com", "pinimg.com", "klipy.com", "alphacoders.com"
+        ]
+        is_gif_or_media_link = any(domain in content_lower for domain in safe_domains) or ".gif" in content_lower
+
+        has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
+        
+        is_raw_url = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower
+        has_link = is_raw_url and not is_gif_or_media_link
+        
+        has_mass_ping = "@everyone" in message.content or "@here" in message.content
+
+        total_attachments = len(message.attachments)
+        is_mass_image_spam = total_attachments >= 3 and not is_gif_or_media_link
+        
+        is_media_channel = MEDIA_CHANNEL_ID is not None and message.channel.id == MEDIA_CHANNEL_ID
+
+        user_id = message.author.id
+        current_time = time.time()
+        is_fast_flood = False
+
+        if user_id in user_last_message_time:
+            time_diff = current_time - user_last_message_time[user_id]
+            if time_diff < 1.5:
+                is_fast_flood = True
+
+        user_last_message_time[user_id] = current_time
+
+        letters = [c for c in message.content if c.isalpha()]
+        is_caps_spam = False
+        if len(letters) > 8:
+            caps_count = sum(1 for c in letters if c.isupper())
+            if (caps_count / len(letters)) > 0.7:
+                is_caps_spam = True
+
+        violation_reason = None
+        if has_invite:
+            violation_reason = "Попытка публикации стороннего инвайта"
+        elif has_link:
+            violation_reason = f"Публикация неразрешенной ссылки (`{message.content}`)"
+        elif has_mass_ping:
+            violation_reason = "Массовый пинг (`@everyone` / `@here`)"
+        elif is_mass_image_spam and not is_media_channel:
+            violation_reason = f"Массовый спам картинками/скринами ({total_attachments} шт. в одном сообщении)"
+        elif is_fast_flood:
+            violation_reason = "Слишком быстрый флуд (превышен лимит КД 1.5 сек)"
+        elif is_caps_spam:
+            violation_reason = "Чрезмерное использование капса (Caps Lock Spam)"
+
+        if violation_reason:
+            try:
+                await message.delete()
+            except Exception as e:
+                print(f"[ОШИБКА АВТОМОДА] Не удалось удалить сообщение: {e}")
+
+            should_send_log = True
+            if user_id in log_cooldowns:
+                if current_time - log_cooldowns[user_id] < 15.0:
+                    should_send_log = False
+            
+            if should_send_log:
+                log_cooldowns[user_id] = current_time
+                log_channel = message.guild.get_channel(AUTO_MOD_LOG_CHANNEL_ID)
+                if log_channel:
+                    created_at = discord.utils.format_dt(message.author.created_at, style='R')
+                    log_embed = discord.Embed(
+                        title="⚠️ КАРДИНАЛ: НОВЫЙ ОТЧЕТ АВТОМОДА",
+                        color=0xE74C3C
+                    )
+                    log_embed.set_thumbnail(url=message.author.display_avatar.url)
+                    log_embed.add_field(name="👤 Пользователь", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
+                    log_embed.add_field(name="📅 Аккаунт создан", value=created_at, inline=True)
+                    log_embed.add_field(name="📂 Канал", value=message.channel.mention, inline=True)
+                    log_embed.add_field(name="⚡ Причина", value=f"```yaml\n{violation_reason}\n```", inline=False)
+                    log_embed.add_field(name="💬 Нарушение", value=f"```text\n{message.content if message.content else '[Медиа / Вложение]'}\n```", inline=False)
+                    log_embed.set_footer(text="Aincrad Security Shield • Сообщение удалено")
+                    try:
+                        await log_channel.send(embed=log_embed)
+                    except Exception:
+                        pass
+            return 
+
+    # Начисление опыта за чистое сообщение
+    await add_xp(message, message.author.id, random.randint(2, 5))
+    await bot.process_commands(message)
+
+# --- СИСТЕМА ВОЙС-АКТИВНОСТИ (ANTI-AFK) ---
+def is_afk(voice_state):
+    return voice_state.self_mute or voice_state.mute or voice_state.self_deaf or voice_state.deaf or voice_state.afk
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if member.bot: return
+    
+    was_afk = before.channel is None or is_afk(before)
+    is_afk_now = after.channel is None or is_afk(after)
+    
+    if was_afk and not is_afk_now:
+        voice_start_times[member.id] = time.time()
+        if member.id not in voice_accumulated:
+            voice_accumulated[member.id] = 0.0
+
+    elif not was_afk and is_afk_now:
+        if member.id in voice_start_times:
+            session_time = time.time() - voice_start_times.pop(member.id)
+            voice_accumulated[member.id] = voice_accumulated.get(member.id, 0.0) + session_time
+
+    if before.channel is not None and after.channel is None:
+        if member.id in voice_start_times:
+            session_time = time.time() - voice_start_times.pop(member.id)
+            voice_accumulated[member.id] = voice_accumulated.get(member.id, 0.0) + session_time
+        
+        total_time = voice_accumulated.pop(member.id, 0.0)
         duration_minutes = int(total_time // 60)
         
         if duration_minutes < 1:
@@ -376,7 +1032,7 @@ async def on_voice_state_update(member, before, after):
                     f"🪙 Заработано колов: **+{earned_coins:,}**\n"
                     f"⚡ Получено опыта: **+{earned_xp:,} XP**\n"
                     f"⏱️ Чистое время: **{duration_minutes} мин.**\n\n"
-                    f"*(Время с выключенным микрофоном или звуком не учитывалось системой)*"
+                    f"*(Время с выключенным микрофоном или звуком не учитывалось)*"
                 ),
                 color=0x00BFFF
             )
@@ -384,7 +1040,6 @@ async def on_voice_state_update(member, before, after):
             await member.send(embed=embed)
         except Exception:
             pass
-
 
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -397,7 +1052,6 @@ async def on_member_join(member: discord.Member):
             print(f"[ОШИБКА] Не удалось выдать роль новичку: {e}")
 
 # --- АДМИНСКАЯ КОМАНДА ТЕХОБСЛУЖИВАНИЯ ---
-
 @bot.tree.command(name="maintenance", description="[АДМИН] Включить/выключить глобальный режим техобслуживания")
 async def maintenance(interaction: discord.Interaction):
     if not is_admin_or_mod(interaction.user):
@@ -409,7 +1063,7 @@ async def maintenance(interaction: discord.Interaction):
     embed = discord.Embed(title="🛠️ УПРАВЛЕНИЕ СИСТЕМОЙ КАРДИНАЛ", description=f"Статус техобслуживания изменен:\n**{status}**", color=0xE74C3C if MAINTENANCE_MODE else 0x2ECC71)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# --- БАЗОВЫЕ КОМАНДЫ (BAGGY ФОРМАТ) ---
+# --- БАЗОВЫЕ КОМАНДЫ ---
 
 @bot.tree.command(name="balance", description="Посмотреть текущий баланс Колов")
 @check_maintenance()
@@ -480,7 +1134,7 @@ async def leaderboard(interaction: discord.Interaction, category: str = "level")
 @check_maintenance()
 async def pay(interaction: discord.Interaction, member: discord.Member, amount: int):
     if amount <= 0 or member.id == interaction.user.id:
-        return await interaction.response.send_message("❌ Некорректная операция! Нельзя переводить средства самому себе или указывать нулевую сумму.", ephemeral=True)
+        return await interaction.response.send_message("❌ Некорректная операция! Нельзя переводить средства самому себе или указывать отрицательную сумму.", ephemeral=True)
     
     sender_coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
     if sender_coins < amount:
@@ -711,7 +1365,7 @@ async def duel(interaction: discord.Interaction, target: discord.Member, amount:
 @bot.tree.command(name="dice", description="Бросить игральные кости против системы (Мин. ставка: 50)")
 @check_maintenance()
 async def dice(interaction: discord.Interaction, amount: int):
-    if not is_admin_or_mod(interaction.user) and amount < 50:
+    if amount < 50:
         return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
         
     coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
@@ -739,6 +1393,7 @@ async def dice(interaction: discord.Interaction, amount: int):
         embed_res.add_field(name="💼 Проигрыш", value=f"```diff\n-{amount:,} Колов\n```", inline=False)
         embed_res.color = 0xE74C3C
     else:
+        users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": amount}})
         embed_res.description = f"🤝 **Ничья.** (`{p_roll}:{b_roll}`). Ставка полностью возвращена."
         embed_res.color = 0xF1C40F
     
@@ -749,7 +1404,7 @@ async def dice(interaction: discord.Interaction, amount: int):
 @check_maintenance()
 @app_commands.choices(choice=[app_commands.Choice(name="Орел", value="орел"), app_commands.Choice(name="Решка", value="решка")])
 async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
-    if not is_admin_or_mod(interaction.user) and amount < 50:
+    if amount < 50:
         return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
         
     coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
@@ -780,7 +1435,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
 @bot.tree.command(name="roulette", description="Сыграть в смертельную Русскую рулетку (Мин. ставка: 50)")
 @check_maintenance()
 async def roulette(interaction: discord.Interaction, amount: int):
-    if not is_admin_or_mod(interaction.user) and amount < 50:
+    if amount < 50:
         return await interaction.response.send_message("❌ Минимальная ставка для азартных игр — **50 Колов**!", ephemeral=True)
         
     coins, _, _, _, _, _, _, _, _, _, _ = get_or_create_user(interaction.user.id)
@@ -857,12 +1512,15 @@ class CustomTitleModal(discord.ui.Modal, title="Покупка кастомно�
 
 class ShopButtonsView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=60)
+        super().__init__(timeout=300)
 
     @discord.ui.button(label="Неприкасаемый (15,000)", style=discord.ButtonStyle.blurple, emoji="🛡️")
     async def buy_untouchable(self, interaction: discord.Interaction, button: discord.ui.Button):
         role = discord.utils.get(interaction.guild.roles, name="Неприкасаемый")
-        if role and role in interaction.user.roles:
+        if not role:
+            return await interaction.response.send_message("❌ Роль «Неприкасаемый» не найдена на сервере. Обратитесь к администрации.", ephemeral=True)
+            
+        if role in interaction.user.roles:
             return await interaction.response.send_message("❌ У вас уже активирован этот статус!", ephemeral=True)
         
         price = 15000
@@ -870,7 +1528,7 @@ class ShopButtonsView(discord.ui.View):
         if coins < price: return await interaction.response.send_message("❌ Недостаточно средств! Требуется 15,000 Колов.", ephemeral=True)
         
         users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -price}})
-        if role: await interaction.user.add_roles(role)
+        await interaction.user.add_roles(role)
         await interaction.response.send_message(f"🎉 Вы успешно приобрели элитный статус **Неприкасаемый**!", ephemeral=True)
 
     @discord.ui.button(label="Кастомная роль (10,000)", style=discord.ButtonStyle.green, emoji="✨")
@@ -944,7 +1602,7 @@ class EditRoleModal(discord.ui.Modal, title="Редактирование кас
 
 class EditRoleSelect(discord.ui.View):
     def __init__(self, roles_list, price):
-        super().__init__(timeout=30)
+        super().__init__(timeout=300)
         options = [discord.SelectOption(label=r.name, value=str(r.id)) for r in roles_list]
         self.select = discord.ui.Select(placeholder="Выберите роль для изменения...", options=options)
         self.select.callback = self.select_callback
@@ -979,7 +1637,7 @@ async def editrole(interaction: discord.Interaction):
 
 class DeleteRoleSelect(discord.ui.View):
     def __init__(self, roles_list, price):
-        super().__init__(timeout=30)
+        super().__init__(timeout=300)
         options = [discord.SelectOption(label=r.name, value=str(r.id)) for r in roles_list]
         self.select = discord.ui.Select(placeholder="Выберите роль для удаления...", options=options)
         self.select.callback = self.select_callback
@@ -1023,7 +1681,7 @@ async def deleterole(interaction: discord.Interaction):
 
 class SetTitleSelect(discord.ui.View):
     def __init__(self, titles_list):
-        super().__init__(timeout=30)
+        super().__init__(timeout=300)
         options = [discord.SelectOption(label=t, value=t) for t in titles_list]
         self.select = discord.ui.Select(placeholder="Выберите титул из списка...", options=options)
         self.select.callback = self.select_callback
@@ -1073,12 +1731,14 @@ class GuildDepositModal(discord.ui.Modal, title="Пополнение казны
 
 class GuildLeaderView(discord.ui.View):
     def __init__(self, guild_name):
-        super().__init__(timeout=60)
+        super().__init__(timeout=300)
         self.guild_name = guild_name
 
     @discord.ui.button(label="Переключить набор (Откр/Закр)", style=discord.ButtonStyle.blurple, emoji="🔒")
     async def toggle_private(self, interaction: discord.Interaction, button: discord.ui.Button):
         g = guilds_collection.find_one({"guild_name": self.guild_name})
+        if not g: return await interaction.response.send_message("❌ Ошибка гильдии.", ephemeral=True)
+        
         new_status = not g.get("is_private", False)
         guilds_collection.update_one({"guild_name": self.guild_name}, {"$set": {"is_private": new_status}})
         status_str = "🔒 ЗАКРЫТ (вход ограничен)" if new_status else "🔓 ОТКРЫТ (свободный набор)"
@@ -1108,7 +1768,7 @@ class GuildCreateModal(discord.ui.Modal, title="Регистрация ново�
 
 class GuildMainView(discord.ui.View):
     def __init__(self, user_id):
-        super().__init__(timeout=60)
+        super().__init__(timeout=300)
         self.user_id = user_id
         _, _, _, _, _, _, _, _, self.g_name, _, _ = get_or_create_user(user_id)
 
@@ -1157,7 +1817,7 @@ class GuildMainView(discord.ui.View):
         users_collection.update_one({"_id": interaction.user.id}, {"$set": {"guild_id": None}})
         
         if g_data['leader_id'] == interaction.user.id:
-            new_member = users_collection.find_one({"guild_id": self.g_name})
+            new_member = users_collection.find_one({"guild_id": self.g_name, "_id": {"$ne": interaction.user.id}})
             if new_member: 
                 guilds_collection.update_one({"guild_name": self.g_name}, {"$set": {"leader_id": new_member["_id"]}})
                 await interaction.response.send_message(f"🚪 Вы покинули гильдию. Новым лидером назначен <@{new_member['_id']}>.", ephemeral=True)
@@ -1180,7 +1840,7 @@ async def guild_menu(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 
-# --- АУКЦИОН РОЛЕЙ (ЕДИНОЕ МЕНЮ С ПАГИНАЦИЕЙ) ---
+# --- АУКЦИОН РОЛЕЙ (ЕДИНОЕ МЕНЮ С ПАГИНАЦИЕЙ И ФИКСАМИ) ---
 
 class SellRoleModal(discord.ui.Modal, title="Выставить роль на аукцион"):
     price_input = discord.ui.TextInput(label="Цена в Колах", placeholder="5000", max_length=10)
@@ -1221,7 +1881,7 @@ class SellRoleModal(discord.ui.Modal, title="Выставить роль на а
 
 class SellRoleSelect(discord.ui.View):
     def __init__(self, roles_list):
-        super().__init__(timeout=30)
+        super().__init__(timeout=300)
         options = [discord.SelectOption(label=r.name, value=str(r.id)) for r in roles_list]
         self.select = discord.ui.Select(placeholder="Выберите роль для выставления...", options=options)
         self.select.callback = self.cb
@@ -1234,16 +1894,55 @@ class SellRoleSelect(discord.ui.View):
             return await interaction.response.send_message("❌ Роль не найдена.", ephemeral=True)
         await interaction.response.send_modal(SellRoleModal(r_id, r.name))
 
-class AuctionBuySelect(discord.ui.View):
-    def __init__(self, items_slice):
-        super().__init__(timeout=60)
-        options = [discord.SelectOption(label=i["role_name"], description=f"Цена: {i['price']:,} Колов", value=str(i["sale_id"])) for i in items_slice]
-        self.select = discord.ui.Select(placeholder="Купить лот с этой страницы...", options=options)
-        self.select.callback = self.buy_callback
-        self.add_item(self.select)
+class AuctionPagingView(discord.ui.View):
+    def __init__(self, items):
+        super().__init__(timeout=300)
+        self.items = items
+        self.page = 0
+        self.per_page = 5
+        self.update_components()
+
+    def update_components(self):
+        self.clear_items()
+        max_pages = max(0, (len(self.items) - 1) // self.per_page)
+
+        prev_btn = discord.ui.Button(label="Назад", style=discord.ButtonStyle.grey, emoji="⬅️", disabled=self.page == 0)
+        prev_btn.callback = self.prev_page
+        self.add_item(prev_btn)
+
+        next_btn = discord.ui.Button(label="Вперед", style=discord.ButtonStyle.grey, emoji="➡️", disabled=self.page >= max_pages)
+        next_btn.callback = self.next_page
+        self.add_item(next_btn)
+
+        start = self.page * self.per_page
+        current_slice = self.items[start:start + self.per_page]
+
+        if current_slice:
+            options = [
+                discord.SelectOption(
+                    label=i["role_name"], 
+                    description=f"Цена: {i['price']:,} Колов", 
+                    value=str(i["sale_id"])
+                ) for i in current_slice
+            ]
+            select = discord.ui.Select(placeholder="Купить лот с этой страницы...", options=options)
+            select.callback = self.buy_callback
+            self.add_item(select)
+
+    async def prev_page(self, interaction: discord.Interaction):
+        self.page -= 1
+        self.update_components()
+        await interaction.response.edit_message(embed=self.get_current_embed(), view=self)
+
+    async def next_page(self, interaction: discord.Interaction):
+        self.page += 1
+        self.update_components()
+        await interaction.response.edit_message(embed=self.get_current_embed(), view=self)
 
     async def buy_callback(self, interaction: discord.Interaction):
-        sale_id = int(self.select.values[0])
+        select_component = [c for c in self.children if isinstance(c, discord.ui.Select)][0]
+        sale_id = int(select_component.values[0])
+        
         item = auction_collection.find_one({"sale_id": sale_id})
         if not item: 
             return await interaction.response.send_message("❌ Этот лот уже продан!", ephemeral=True)
@@ -1268,19 +1967,14 @@ class AuctionBuySelect(discord.ui.View):
                 pass
                 
         await interaction.response.send_message(f"🎉 Вы успешно приобрели роль **{item['role_name']}** за **{item['price']:,} Колов**!", ephemeral=True)
-
-class AuctionPagingView(discord.ui.View):
-    def __init__(self, items):
-        super().__init__(timeout=60)
-        self.items = items
-        self.page = 0
-        self.per_page = 5  
-        self.update_buttons()
-
-    def update_buttons(self):
+        
+        # Обновляем список лотов после покупки
+        self.items = list(auction_collection.find())
         max_pages = max(0, (len(self.items) - 1) // self.per_page)
-        self.prev_button.disabled = self.page == 0
-        self.next_button.disabled = self.page >= max_pages
+        if self.page > max_pages:
+            self.page = max_pages
+        self.update_components()
+        await interaction.message.edit(embed=self.get_current_embed(), view=self)
 
     def get_current_embed(self):
         embed = discord.Embed(
@@ -1291,6 +1985,9 @@ class AuctionPagingView(discord.ui.View):
         start = self.page * self.per_page
         current_slice = self.items[start:start + self.per_page]
         
+        if not current_slice:
+            embed.description = "На этой странице пусто. Лоты закончились."
+            
         for item in current_slice:
             embed.add_field(
                 name=f"📦 Лот: {item['role_name']}", 
@@ -1298,33 +1995,13 @@ class AuctionPagingView(discord.ui.View):
                 inline=False
             )
             
-        embed.set_footer(text=f"Страница {self.page + 1} из {max(1, (len(self.items) + self.per_page - 1) // self.per_page)}")
-        return embed, current_slice
-
-    async def update_view(self, interaction):
-        self.update_buttons()
-        self.clear_items()
-        self.add_item(self.prev_button)
-        self.add_item(self.next_button)
-        embed, slice = self.get_current_embed()
-        if slice:
-            buy_select = AuctionBuySelect(slice).select
-            self.add_item(buy_select)
-        await interaction.response.edit_message(embed=embed, view=self)
-
-    @discord.ui.button(label="Назад", style=discord.ButtonStyle.grey, emoji="⬅️")
-    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.page -= 1
-        await self.update_view(interaction)
-
-    @discord.ui.button(label="Вперед", style=discord.ButtonStyle.grey, emoji="➡️")
-    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.page += 1
-        await self.update_view(interaction)
+        max_pages = max(1, (len(self.items) + self.per_page - 1) // self.per_page)
+        embed.set_footer(text=f"Страница {self.page + 1} из {max_pages}")
+        return embed
 
 class AuctionMainView(discord.ui.View):
     def __init__(self): 
-        super().__init__(timeout=60)
+        super().__init__(timeout=300)
 
     @discord.ui.button(label="Посмотреть лоты", style=discord.ButtonStyle.blurple, emoji="🛒")
     async def browse(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1332,10 +2009,7 @@ class AuctionMainView(discord.ui.View):
         if not items: 
             return await interaction.response.send_message("📦 На текущий момент торговая площадка пуста.", ephemeral=True)
         view = AuctionPagingView(items)
-        embed, slice = view.get_current_embed()
-        if slice: 
-            view.add_item(AuctionBuySelect(slice).select)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.send_message(embed=view.get_current_embed(), view=view, ephemeral=True)
 
     @discord.ui.button(label="Выставить роль на продажу", style=discord.ButtonStyle.green, emoji="🏷️")
     async def sell(self, interaction: discord.Interaction, button: discord.ui.Button):
