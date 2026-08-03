@@ -422,7 +422,7 @@ class DuelAcceptView(discord.ui.View):
 
         # Ставим гифку СТОЛКНОВЕНИЯ КЛИНКОВ по прямой ссылке
         embed_loading = discord.Embed(title="⚔️ АРЕНА ДУЭЛЕЙ АЙНКРАДА", description=f"Скрещены клинки между {self.challenger.mention} и {self.target.mention}!\nСтавка матча: **{self.amount:,} Колов**.", color=0xE67E22)
-        embed_loading.set_image(url="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExMXZkMXBlMWtnMWYyYWlnbnh4cXlpc2Q2YWhsZ2V3MGV6aTdtcGJmNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Lq0h93752f6J9tijrh/giphy.gif")
+        embed_loading.set_image(url="https://giffiles.alphacoders.com/131/131044.gif")
         msg = await interaction.followup.send(embed=embed_loading)
         await asyncio.sleep(3.0)
 
