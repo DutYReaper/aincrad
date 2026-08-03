@@ -37,6 +37,11 @@ bot = commands.Bot(
 # Глобальный флаг режима техобслуживания
 MAINTENANCE_MODE = False
 
+# --- НАСТРОЙКИ АВТОМОДА ДЛЯ МЕДИА ---
+# Укажи ID канала, куда РАЗРЕШЕНО отправлять картинки и видео (например: 123456789012345678). 
+# Если поставить None, то картинки будут запрещены везде для обычных участников.
+MEDIA_CHANNEL_ID = None
+
 # --- СЛОВАРИ ДЛЯ ANTI-AFK И АВТОМОДЕРАЦИИ ---
 voice_start_times = {} # Время начала активной фазы
 voice_accumulated = {} # Накопленное чистое время за сессию
@@ -216,26 +221,23 @@ async def on_message(message):
         if any(role in role_names for role in allowed_roles):
             is_privileged = True
 
-    _, _, level, _, _, _, _, _, _, _, _ = get_or_create_user(message.author.id)
-
-    # Дополнительно проверяем по ролям или уровню, есть ли у юзера доступ к медиа (если уровень >= 2 или есть любая роль этажа)
-    has_tier_role = any(data["name"].lower() in [r.name.lower() for r in message.author.roles] for data in ROLES_MAPPING.values())
-    is_allowed_media = is_privileged or level >= 2 or has_tier_role
-
     # --- УМНАЯ АВТОМОДЕРАЦИЯ И АНТИ-СПАМ ---
     if not is_privileged:
         content_lower = message.content.lower().strip()
         
         has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
-        has_link = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower or "klipy.com" in content_lower
+        has_link = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower
         has_mass_ping = "@everyone" in message.content or "@here" in message.content
-        
-        has_gif_link = (not is_allowed_media) and ("tenor.com" in content_lower or "giphy.com" in content_lower or ".gif" in content_lower or "klipy.com" in content_lower)
-        has_gif_attachment = (not is_allowed_media) and any(
+
+        # Проверка гифок (разрешены всегда: Tenor, Giphy и ссылки с .gif)
+        is_gif = "tenor.com" in content_lower or "giphy.com" in content_lower or ".gif" in content_lower or any(
             att.filename.lower().endswith(".gif") or (att.content_type and "gif" in att.content_type) 
             for att in message.attachments
         )
-        has_file_attachment = (not is_allowed_media) and len(message.attachments) > 0
+
+        # Проверка обычных файлов / картинок / видео
+        has_media_attachments = len(message.attachments) > 0 and not is_gif
+        is_media_channel = MEDIA_CHANNEL_ID is not None and message.channel.id == MEDIA_CHANNEL_ID
 
         user_id = message.author.id
         current_time = time.time()
@@ -264,8 +266,8 @@ async def on_message(message):
             violation_reason = f"Публикация неразрешенной ссылки (`{message.content}`)"
         elif has_mass_ping:
             violation_reason = "Массовый пинг (`@everyone` / `@here`)"
-        elif has_gif_link or has_gif_attachment or has_file_attachment:
-            violation_reason = f"Отправка медиа/гифки на {level} этаже (ограничение до 2 этажа)"
+        elif has_media_attachments and not is_media_channel:
+            violation_reason = "Отправка картинок/видео вне специального медиа-канала"
         elif is_fast_flood:
             violation_reason = "Слишком быстрый флуд (превышен лимит КД 1.5 сек)"
         elif is_caps_spam:
