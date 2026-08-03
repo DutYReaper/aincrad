@@ -37,9 +37,15 @@ bot = commands.Bot(
 # Глобальный флаг режима техобслуживания
 MAINTENANCE_MODE = False
 
-# --- СЛОВАРИ ДЛЯ ANTI-AFK ВОЙС-СИСТЕМЫ ---
+# --- СЛОВАРИ ДЛЯ ANTI-AFK И АВТОМОДЕРАЦИИ ---
 voice_start_times = {} # Время начала активной фазы
 voice_accumulated = {} # Накопленное чистое время за сессию
+
+# Словари для тотальной автомодерации
+user_message_timestamps = {}
+user_message_history = {}
+
+AUTO_MOD_LOG_CHANNEL_ID = 1529472394102706336
 
 def get_or_create_user(user_id):
     user = users_collection.find_one({"_id": user_id})
@@ -80,7 +86,7 @@ def is_admin_or_mod(member: discord.Member):
         return True
     role_names = [r.name.lower() for r in member.roles]
     # Добавлены все роли администрации Айнкрада
-    allowed_roles = ["модератор", "moderator", "администратор", "administrator", "саппорт", "support", "founder", "co-founder"]
+    allowed_roles = ["модератор", "moderator", "администратор", "administrator", "саппорт", "support", "founder", "co-founder", "content maker", "sigmo brazzers"]
     if any(role in role_names for role in allowed_roles):
         return True
     return False
@@ -190,58 +196,160 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot or not message.guild:
         return
+        
     global MAINTENANCE_MODE
     if MAINTENANCE_MODE and not is_admin_or_mod(message.author):
         return
+
+    # Проверка привилегий (Админы и спец-роли стаффа обходят автомод)
+    is_privileged = False
+    if message.author.guild_permissions.administrator:
+        is_privileged = True
+    else:
+        role_names = [r.name.lower() for r in message.author.roles]
+        allowed_roles = [
+            "Founder", "Co-Founder", "Moderator", "модератор", 
+            "Support", "саппорт", "Content maker", "sigmo brazzers"
+        ]
+        if any(role in role_names for role in allowed_roles):
+            is_privileged = True
+
+    _, _, level, _, _, _, _, _, _, _, _ = get_or_create_user(message.author.id)
+
+    # --- ЖЕСТКАЯ АВТОМОДЕРАЦИЯ И АНТИ-СПАМ ---
+    if not is_privileged:
+        content_lower = message.content.lower().strip()
+        
+        has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
+        has_link = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower or "klipy.com" in content_lower
+        has_mass_ping = "@everyone" in message.content or "@here" in message.content
+        
+        has_gif_link = level < 2 and ("tenor.com" in content_lower or "giphy.com" in content_lower or ".gif" in content_lower or "klipy.com" in content_lower)
+        has_gif_attachment = level < 2 and any(
+            att.filename.lower().endswith(".gif") or (att.content_type and "gif" in att.content_type) 
+            for att in message.attachments
+        )
+        has_file_attachment = level < 2 and len(message.attachments) > 0
+
+        user_id = message.author.id
+        current_time = time.time()
+        is_flood_detected = False
+        is_garbage_spam = False
+
+        if user_id not in user_message_timestamps:
+            user_message_timestamps[user_id] = []
+            user_message_history[user_id] = []
+
+        # Очищаем историю времени старше 5 секунд (как в Sapphire: >=3 сообщений за 5 сек)
+        user_message_timestamps[user_id] = [t for t in user_message_timestamps[user_id] if current_time - t < 5.0]
+        user_message_timestamps[user_id].append(current_time)
+
+        # 1. Быстрый флуд (>= 3 сообщений за 5 секунд)
+        if len(user_message_timestamps[user_id]) >= 3:
+            is_flood_detected = True
+
+        # Сохраняем текст в историю для анти-мусора
+        if message.content:
+            user_message_history[user_id].append(content_lower)
+            if len(user_message_history[user_id]) > 6:
+                user_message_history[user_id].pop(0)
+
+        # 2. Защита от медленного мусора (спам короткими бессмысленными словами подряд)
+        recent_texts = user_message_history[user_id]
+        if len(recent_texts) >= 4:
+            short_msgs_count = sum(1 for txt in recent_texts if len(txt) <= 5)
+            if short_msgs_count >= 4:
+                is_garbage_spam = True
+
+        # Проверка на жесткий капс (букв > 8 и >70% заглавных)
+        letters = [c for c in message.content if c.isalpha()]
+        is_caps_spam = False
+        if len(letters) > 8:
+            caps_count = sum(1 for c in letters if c.isupper())
+            if (caps_count / len(letters)) > 0.7:
+                is_caps_spam = True
+
+        violation_reason = None
+        if has_invite:
+            violation_reason = "Попытка публикации стороннего инвайта"
+        elif has_link:
+            violation_reason = f"Публикация неразрешенной ссылки (`{message.content}`)"
+        elif has_mass_ping:
+            violation_reason = "Массовый пинг (`@everyone` / `@here`)"
+        elif has_gif_link or has_gif_attachment or has_file_attachment:
+            violation_reason = f"Отправка медиа/гифки на {level} этаже (ограничение до 2 этажа)"
+        elif is_flood_detected:
+            violation_reason = "Флуд: отправлено >= 3 сообщений за 5 секунд"
+        elif is_garbage_spam:
+            violation_reason = "Засорение чата бессмысленным мусором (спам короткими словами)"
+        elif is_caps_spam:
+            violation_reason = "Чрезмерное использование капса (Caps Lock Spam)"
+
+        if violation_reason:
+            try:
+                await message.delete()
+            except Exception as e:
+                print(f"[ОШИБКА АВТОМОДА] Не удалось удалить сообщение: {e}")
+
+            log_channel = message.guild.get_channel(AUTO_MOD_LOG_CHANNEL_ID)
+            if log_channel:
+                log_embed = discord.Embed(
+                    title="🛡️ КАРДИНАЛ: СРАБОТАЛ АВТОМОД",
+                    description=(
+                        f"**Нарушитель:** {message.author.mention} (`{message.author.id}`)\n"
+                        f"**Канал:** {message.channel.mention}\n"
+                        f"**Причина:** {violation_reason}\n\n"
+                        f"**Текст:**\n```text\n{message.content if message.content else '[Файл / Медиа]'}\n```"
+                    ),
+                    color=0xE74C3C
+                )
+                log_embed.set_thumbnail(url=message.author.display_avatar.url)
+                try:
+                    await log_channel.send(embed=log_embed)
+                except Exception:
+                    pass
+            return # Стоп! Опыт не начисляется, команды не обрабатываются.
+
+    # Начисление опыта за чистое сообщение и обработка команд
     await add_xp(message, message.author.id, random.randint(2, 5))
     await bot.process_commands(message)
 
 
 # --- СИСТЕМА ВОЙС-АКТИВНОСТИ (ANTI-AFK) ---
 def is_afk(voice_state):
-    # Игрок считается АФК, если выключил микрофон ИЛИ звук (включая серверный мут)
     return voice_state.self_mute or voice_state.mute or voice_state.self_deaf or voice_state.deaf or voice_state.afk
 
 @bot.event
 async def on_voice_state_update(member, before, after):
     if member.bot: return
     
-    # Проверяем состояния: был ли АФК до этого и стал ли АФК сейчас
     was_afk = before.channel is None or is_afk(before)
     is_afk_now = after.channel is None or is_afk(after)
     
-    # СИТУАЦИЯ А: Зашел в канал с включенным микрофоном ИЛИ размутился
     if was_afk and not is_afk_now:
         voice_start_times[member.id] = time.time()
         if member.id not in voice_accumulated:
             voice_accumulated[member.id] = 0.0
 
-    # СИТУАЦИЯ Б: Замутился/выключил наушники ИЛИ перешел в канал АФК
     elif not was_afk and is_afk_now:
         if member.id in voice_start_times:
-            # Считаем, сколько он просидел активным до этого момента, и плюсуем в копилку
             session_time = time.time() - voice_start_times.pop(member.id)
             voice_accumulated[member.id] = voice_accumulated.get(member.id, 0.0) + session_time
 
-    # СИТУАЦИЯ В: Полностью вышел из голосового канала (выдаем отчет и награду)
     if before.channel is not None and after.channel is None:
-        # Закидываем последний кусок времени, если выходил активным
         if member.id in voice_start_times:
             session_time = time.time() - voice_start_times.pop(member.id)
             voice_accumulated[member.id] = voice_accumulated.get(member.id, 0.0) + session_time
         
-        # Достаем всё накопленное чистое время
         total_time = voice_accumulated.pop(member.id, 0.0)
         duration_minutes = int(total_time // 60)
         
         if duration_minutes < 1:
-            return # Если чистого времени меньше минуты — отчет не шлем
+            return 
             
-        # Награда: 1 Кол и 1 XP за каждую чистую минуту
         earned_coins = duration_minutes
         earned_xp = duration_minutes
         
-        # Записываем в базу
         users_collection.update_one(
             {"_id": member.id}, 
             {
@@ -254,7 +362,6 @@ async def on_voice_state_update(member, before, after):
         )
         await add_xp(member, member.id, earned_xp)
         
-        # Системный отчет в ЛС
         try:
             embed = discord.Embed(
                 title="🎙️ СИСТЕМНЫЙ ОТЧЕТ: ВОЙС-АКТИВНОСТЬ",
@@ -275,7 +382,6 @@ async def on_voice_state_update(member, before, after):
 
 @bot.event
 async def on_member_join(member: discord.Member):
-    # Автоматически выдаем роль unverify при входе нового участника
     role = discord.utils.get(member.guild.roles, name="unverify") 
     if role:
         try:
@@ -332,7 +438,7 @@ async def profile(interaction: discord.Interaction, member: discord.Member = Non
     
     embed.add_field(name="🎙️ Часы в Voice", value=f"```yaml\n{vh} ч. {vm} м.\n```", inline=True)
     embed.add_field(name="🏰 Гильдия", value=f"```yaml\n{guild_id if guild_id else 'Нет гильдии'}\n```", inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True) # Пустое поле для выравнивания
+    embed.add_field(name="\u200b", value="\u200b", inline=True) 
     
     embed.add_field(name="✨ Активный титул", value=f"```fix\n{special_title}\n```", inline=False)
     embed.add_field(name="📊 Прогресс опыта (XP)", value=f"{xp} / {next_level_xp} XP\n{bar}", inline=False)
@@ -1446,7 +1552,6 @@ async def idea(interaction: discord.Interaction):
 
 # --- СИСТЕМА ВЕРИФИКАЦИИ И DOCS-ЛОГИРОВАНИЯ ---
 
-# ⚠️ ВАЖНО: Впиши сюда ID закрытого канала для блатного стаффа (логов верификации)
 DOCS_CHANNEL_ID = 1533682208487903483
 
 @bot.tree.command(name="setup_verify", description="[АДМИН] Установить сообщение с инструкцией по верификации")
@@ -1479,13 +1584,7 @@ async def setup_verify(interaction: discord.Interaction):
     app_commands.Choice(name="Женщина ♀️", value="♀️")
 ])
 async def verify_user(interaction: discord.Interaction, member: discord.Member, gender: str):
-    has_perms = interaction.user.guild_permissions.administrator
-    if not has_perms:
-        role_names = [r.name.lower() for r in interaction.user.roles]
-        if any(r in role_names for r in ["moderator", "модератор", "support", "саппорт", "founder", "co-founder"]):
-            has_perms = True
-
-    if not has_perms: 
+    if not is_admin_or_mod(interaction.user): 
         return await interaction.response.send_message("❌ У вас нет прав саппорта или модератора для верификации игроков!", ephemeral=True)
         
     role = discord.utils.get(interaction.guild.roles, name=gender)
@@ -1507,7 +1606,6 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
         embed.set_thumbnail(url=member.display_avatar.url)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        # Отправка DOCS в закрытый канал для стаффа с готовой ссылкой Discord Sensor
         docs_channel = interaction.guild.get_channel(DOCS_CHANNEL_ID)
         if docs_channel:
             docs_embed = discord.Embed(title="📁 DOCS: ИДЕНТИФИКАЦИЯ ИГРОКА", color=0x2B2D31)
@@ -1519,7 +1617,6 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
             created_at = discord.utils.format_dt(member.created_at, style='F')
             docs_embed.add_field(name="Аккаунт создан", value=created_at, inline=False)
             
-            # Ссылка на Discord Sensor с подстановкой ID
             sensor_link = f"https://discord-sensor.com/members/{member.id}"
             docs_embed.add_field(name="Discord Sensor", value=f"🔗 [Открыть профиль]({sensor_link})", inline=False)
             
@@ -1540,7 +1637,7 @@ async def setup_ranks(interaction: discord.Interaction):
         description=(
             "«Добро пожаловать в мир, где каждый шаг наверх приносит награду. Общайтесь в чатах и сидите в войсах, чтобы преодолевать этажи и открывать новые зоны». 🛡️\n\n"
             "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n\n"
-            "**🏆 ИЕРАРХИЯ ЭТАЖЕЙ И НАГРАДЫ**\n"
+            "🏆 **ИЕРАРХИЯ ЭТАЖЕЙ И НАГРАДЫ**\n"
             "👤 `Обычный житель` (Без этажа)\n"
             "⚪ `Начало Легенды` (LVL 2) — 60-80 Колов / день\n"
             "🟢 `Путешественник` (LVL 5) — 70-100 Колов / день\n"
@@ -1554,10 +1651,10 @@ async def setup_ranks(interaction: discord.Interaction):
             "👑 `Вершитель Судеб` (LVL 80) — 480-650 Колов / день\n"
             "⚔️ `Beater` (LVL 100) — 800-1000 Колов / день\n\n"
             "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n\n"
-            "**💎 ЭЛИТНЫЙ СТАТУС БУСТЕРА**\n"
+            "💎 **ЭЛИТНЫЙ СТАТУС БУСТЕРА**\n"
             "🌟 `Бустер сервера` — **500 Колов / день!**\n\n"
             "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n\n"
-            "**⚙️ ПОЛЕЗНЫЕ КОМАНДЫ КАРДИНАЛА**\n"
+            "⚙️ **ПОЛЕЗНЫЕ КОМАНДЫ КАРДИНАЛА**\n"
             "📊 `/profile` — ваш текущий этаж, капитал и прогресс.\n"
             "🏆 `/leaderboard` — глобальная таблица топ-10 игроков.\n"
             "🎁 `/daily` — забрать системную награду в виде **Колов и Опыта (XP)**. Размер бонуса растет от вашего этажа и серии ежедневных входов!"
@@ -1569,111 +1666,6 @@ async def setup_ranks(interaction: discord.Interaction):
     
     await interaction.channel.send(embed=embed)
     await interaction.response.send_message("✅ Информационное сообщение о рангах успешно установлено в канал.", ephemeral=True)
-
-# Словарь для отслеживания времени сообщений
-user_last_message_time = {}
-
-@bot.event
-async def on_message(message):
-    if message.author.bot or not message.guild:
-        return
-        
-    global MAINTENANCE_MODE
-    if MAINTENANCE_MODE and not is_admin_or_mod(message.author):
-        return
-
-    # --- ПРОВЕРКА ПРИВИЛЕГИЙ ---
-    # Если ты проверяешь с аккаунта, у которого админка или роли стаффа — бот не будет его трогать!
-    # Убедись, что у тестового твинка НЕТ прав администратора и этих ролей:
-    is_privileged = False
-    if message.author.guild_permissions.administrator:
-        is_privileged = True
-    else:
-        role_names = [r.name.lower() for r in message.author.roles]
-        allowed_roles = [
-            "founder", "co-founder", "moderator", "модератор", 
-            "support", "саппорт", "content maker", "sigmo brazzers"
-        ]
-        if any(role in role_names for role in allowed_roles):
-            is_privileged = True
-
-    # Получаем уровень игрока
-    _, _, level, _, _, _, _, _, _, _, _ = get_or_create_user(message.author.id)
-
-    # --- АВТОМОДЕРАЦИЯ ---
-    if not is_privileged:
-        content_lower = message.content.lower()
-        
-        has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
-        # Ловим любые ссылки, включая те, что на скриншоте (klipy.com, google.com)
-        has_link = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower or "klipy.com" in content_lower
-        has_mass_ping = "@everyone" in message.content or "@here" in message.content
-        
-        has_gif_link = level < 2 and ("tenor.com" in content_lower or "giphy.com" in content_lower or ".gif" in content_lower or "klipy.com" in content_lower)
-        has_gif_attachment = level < 2 and any(
-            att.filename.lower().endswith(".gif") or (att.content_type and "gif" in att.content_type) 
-            for att in message.attachments
-        )
-        has_file_attachment = level < 2 and len(message.attachments) > 0
-
-        # Защита от быстрого флуда
-        is_fast_flood = False
-        current_time = time.time()
-        if message.author.id in user_last_message_time:
-            if current_time - user_last_message_time[message.author.id] < 0.6:
-                is_fast_flood = True
-        user_last_message_time[message.author.id] = current_time
-
-        # Проверка на капс (если букв больше 8 и >70% заглавных)
-        letters = [c for c in message.content if c.isalpha()]
-        is_caps_spam = False
-        if len(letters) > 8:
-            caps_count = sum(1 for c in letters if c.isupper())
-            if (caps_count / len(letters)) > 0.7:
-                is_caps_spam = True
-
-        violation_reason = None
-        if has_invite:
-            violation_reason = "Попытка публикации стороннего инвайта"
-        elif has_link:
-            violation_reason = f"Публикация ссылки (`{message.content}`)"
-        elif has_mass_ping:
-            violation_reason = "Массовый пинг (`@everyone` / `@here`)"
-        elif has_gif_link or has_gif_attachment or has_file_attachment:
-            violation_reason = f"Медиа/гифки на {level} этаже"
-        elif is_fast_flood:
-            violation_reason = "Слишком быстрый флуд (Rate Limit)"
-        elif is_caps_spam:
-            violation_reason = "Капс-лок спам"
-
-        if violation_reason:
-            try:
-                await message.delete()
-            except Exception as e:
-                print(f"[ОШИБКА АВТОМОДА] Не удалось удалить сообщение: {e}")
-
-            log_channel = message.guild.get_channel(AUTO_MOD_LOG_CHANNEL_ID)
-            if log_channel:
-                log_embed = discord.Embed(
-                    title="🛡️ КАРДИНАЛ: СРАБОТАЛ АВТОМОД",
-                    description=(
-                        f"**Нарушитель:** {message.author.mention} (`{message.author.id}`)\n"
-                        f"**Канал:** {message.channel.mention}\n"
-                        f"**Причина:** {violation_reason}\n\n"
-                        f"**Текст:**\n```text\n{message.content if message.content else '[Файл]'}\n```"
-                    ),
-                    color=0xE74C3C
-                )
-                log_embed.set_thumbnail(url=message.author.display_avatar.url)
-                try:
-                    await log_channel.send(embed=log_embed)
-                except Exception:
-                    pass
-            return # Стоп, дальше код не идет (опыт не капает)
-
-    # Начисление опыта и обработка команд (выполняется только если сообщение чистое)
-    await add_xp(message, message.author.id, random.randint(2, 5))
-    await bot.process_commands(message)
 
 keep_alive()
 bot.run(os.getenv("TOKEN"))
