@@ -39,7 +39,7 @@ MAINTENANCE_MODE = False
 
 # --- НАСТРОЙКИ АВТОМОДА ДЛЯ МЕДИА ---
 # Укажи ID канала, куда РАЗРЕШЕНО отправлять картинки и видео (например: 123456789012345678). 
-# Если поставить None, то картинки будут запрещены везде для обычных участников.
+# Если поставить None, то автомод будет проверять сообщения везде, но разрешать одиночные картинки/гифки.
 MEDIA_CHANNEL_ID = None
 
 # --- СЛОВАРИ ДЛЯ ANTI-AFK И АВТОМОДЕРАЦИИ ---
@@ -229,14 +229,15 @@ async def on_message(message):
         has_link = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower
         has_mass_ping = "@everyone" in message.content or "@here" in message.content
 
-        # Проверка гифок (разрешены всегда: Tenor, Giphy и ссылки с .gif)
-        is_gif = "tenor.com" in content_lower or "giphy.com" in content_lower or ".gif" in content_lower or any(
-            att.filename.lower().endswith(".gif") or (att.content_type and "gif" in att.content_type) 
-            for att in message.attachments
-        )
+        # Проверка гифок и медиа-ссылок (Tenor, Giphy, Imgur и т.д.)
+        safe_domains = ["tenor.com", "giphy.com", "imgur.com", "discordapp.com", "discord.com", "pinimg.com"]
+        is_gif_or_media_link = any(domain in content_lower for domain in safe_domains) or ".gif" in content_lower
 
-        # Проверка обычных файлов / картинок / видео
-        has_media_attachments = len(message.attachments) > 0 and not is_gif
+        total_attachments = len(message.attachments)
+        
+        # Считаем спам-рассылкой, если прикреплено 3 и более файлов/картинок разом (как рассылка казика)
+        is_mass_image_spam = total_attachments >= 3 and not is_gif_or_media_link
+        
         is_media_channel = MEDIA_CHANNEL_ID is not None and message.channel.id == MEDIA_CHANNEL_ID
 
         user_id = message.author.id
@@ -266,8 +267,8 @@ async def on_message(message):
             violation_reason = f"Публикация неразрешенной ссылки (`{message.content}`)"
         elif has_mass_ping:
             violation_reason = "Массовый пинг (`@everyone` / `@here`)"
-        elif has_media_attachments and not is_media_channel:
-            violation_reason = "Отправка картинок/видео вне специального медиа-канала"
+        elif is_mass_image_spam and not is_media_channel:
+            violation_reason = f"Массовый спам картинками/скринами ({total_attachments} шт. в одном сообщении)"
         elif is_fast_flood:
             violation_reason = "Слишком быстрый флуд (превышен лимит КД 1.5 сек)"
         elif is_caps_spam:
