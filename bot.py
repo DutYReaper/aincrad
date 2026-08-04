@@ -358,7 +358,7 @@ async def on_voice_state_update(member, before, after):
         )
         await add_xp(member, member.id, earned_xp)
         
-       try:
+        try:
             embed = discord.Embed(
                 title="────── ┌ 🎙️ ВОЙС-АКТИВНОСТЬ ┐ ──────",
                 description=(
