@@ -360,17 +360,32 @@ async def on_voice_state_update(member, before, after):
         
         try:
             embed = discord.Embed(
-                title="🎙️ СИСТЕМНЫЙ ОТЧЕТ: ВОЙС-АКТИВНОСТЬ",
-                description=(
-                    f"Сеанс связи в голосовом канале завершен.\n\n"
-                    f"🪙 Заработано колов: **+{earned_coins:,}**\n"
-                    f"⚡ Получено опыта: **+{earned_xp:,} XP**\n"
-                    f"⏱️ Чистое время: **{duration_minutes} мин.**\n\n"
-                    f"*(Время с выключенным микрофоном или звуком не учитывалось)*"
-                ),
+                title="────── ┌ 🎙️ ВОЙС-АКТИВНОСТЬ ┐ ──────",
+                description="Сеанс связи в голосовом канале успешно завершен!\n\n┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈",
                 color=0x00BFFF
             )
-            embed.set_footer(text="Cardinal Anti-AFK System")
+            embed.add_field(
+                name="🪙 Колы", 
+                value=f"```fix\n+{earned_coins:,}\n```", 
+                inline=True
+            )
+            embed.add_field(
+                name="⚡ Опыт", 
+                value=f"```yaml\n+{earned_xp:,} XP\n```", 
+                inline=True
+            )
+            embed.add_field(
+                name="⏱️ Время", 
+                value=f"```yaml\n{duration_minutes} мин.\n```", 
+                inline=True
+            )
+            embed.add_field(
+                name="\u200b", 
+                value="*(Время с выключенным микрофоном или звуком не учитывалось)*", 
+                inline=False
+            )
+            embed.set_footer(text="Cardinal Anti-AFK System • Айнкрад")
+            
             await member.send(embed=embed)
         except Exception:
             pass
