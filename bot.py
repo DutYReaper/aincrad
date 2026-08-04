@@ -360,8 +360,15 @@ async def on_voice_state_update(member, before, after):
         
         try:
             embed = discord.Embed(
-                title="────── ┌ 🎙️ ВОЙС-АКТИВНОСТЬ ┐ ──────",
-                description="Сеанс связи в голосовом канале успешно завершен!\n\n┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈",
+                description=(
+                    "```yaml\n"
+                    "────── ┌ 🎙️ ВОЙС-АКТИВНОСТЬ ┐ ──────\n"
+                    "```\n"
+                    "Сеанс связи в голосовом канале успешно завершен!\n\n"
+                    "```yaml\n"
+                    "────────────────────────────────\n"
+                    "```"
+                ),
                 color=0x00BFFF
             )
             embed.add_field(
