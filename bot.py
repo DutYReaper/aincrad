@@ -360,10 +360,14 @@ async def on_voice_state_update(member, before, after):
         
         try:
             embed = discord.Embed(
-                title="─────────────── ┌ 🎙️ ВОЙС-АКТИВНОСТЬ ┐ ───────────────",
                 description=(
-                    "Сеанс связи в голосовом канале успешно завершен!\n\n"
-                    "─────────────────────────────────────────────────────────────"
+                    "```ansi\n"
+                    "\u001b[36m─────────────── ┌ 🎙️ ВОЙС-АКТИВНОСТЬ ┐ ───────────────\u001b[0m\n"
+                    "```\n"
+                    "Сеанс связи в голосовом канале успешно завершен!\n"
+                    "```ansi\n"
+                    "\u001b[36m────────────────────────────────────────────────────────\u001b[0m\n"
+                    "```"
                 ),
                 color=0x00BFFF
             )
@@ -392,7 +396,6 @@ async def on_voice_state_update(member, before, after):
             await member.send(embed=embed)
         except Exception:
             pass
-
 @bot.event
 async def on_member_join(member: discord.Member):
     role = discord.utils.get(member.guild.roles, name="unverify") 
