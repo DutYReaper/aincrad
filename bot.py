@@ -402,42 +402,51 @@ async def on_message(message):
 
     # --- ПРЕМОДЕРАЦИЯ МЕДИАКОНТЕНТА И РОЛИКОВ ---
     is_media_zone = message.channel.id in MEDIA_CHANNELS or message.channel.id == VIDEO_CHANNEL_ID
-    has_media_attachments = len(message.attachments) > 0
-    has_media_links = (".gif" in message.content.lower()) or ("tenor.com" in message.content.lower()) or (".mp4" in message.content.lower()) or has_stream_link
     
-    if is_media_zone and (has_media_attachments or has_media_links) and not violation_reason:
-        try:
-            mod_channel = bot.get_channel(MEDIA_LOG_CHANNEL_ID)
-            if mod_channel:
-                files_data = []
-                for att in message.attachments:
-                    file_bytes = await att.read()
-                    files_data.append({"bytes": file_bytes, "filename": att.filename})
+    # Если сообщение отправлено в медиа-канал и это не служебное сообщение/нарушение
+    if is_media_zone and not violation_reason:
+        # Проверяем, есть ли контент (файлы, картинки, встроенные эмбеды, ссылки, гифки)
+        has_content = len(message.attachments) > 0 or len(message.embeds) > 0 or "http://" in message.content.lower() or "https://" in message.content.lower() or ".gif" in message.content.lower()
+        
+        if has_content:
+            try:
+                mod_channel = bot.get_channel(MEDIA_LOG_CHANNEL_ID)
+                if mod_channel:
+                    files_data = []
+                    for att in message.attachments:
+                        file_bytes = await att.read()
+                        files_data.append({"bytes": file_bytes, "filename": att.filename})
 
-                mod_embed = discord.Embed(
-                    title="🔍 ПРЕМОДЕРАЦИЯ КОНТЕНТА",
-                    description=f"**Автор:** {message.author.mention} (`{message.author.id}`)\n**Канал:** {message.channel.mention}",
-                    color=0xF1C40F
-                )
-                if message.content:
-                    mod_embed.add_field(name="Текст / Ссылка", value=message.content, inline=False)
-                if message.attachments:
-                    mod_embed.set_image(url=message.attachments[0].url)
-                
-                mod_embed.set_footer(text="Aincrad Media Verification System")
+                    mod_embed = discord.Embed(
+                        title="🔍 ПРЕМОДЕРАЦИЯ КОНТЕНТА",
+                        description=f"**Автор:** {message.author.mention} (`{message.author.id}`)\n**Канал:** {message.channel.mention}",
+                        color=0xF1C40F
+                    )
+                    if message.content:
+                        mod_embed.add_field(name="Текст / Ссылка", value=message.content, inline=False)
+                    
+                    if message.attachments:
+                        mod_embed.set_image(url=message.attachments[0].url)
+                    elif message.embeds:
+                        if message.embeds[0].thumbnail:
+                            mod_embed.set_image(url=message.embeds[0].thumbnail.url)
+                        elif message.embeds[0].image:
+                            mod_embed.set_image(url=message.embeds[0].image.url)
+                    
+                    mod_embed.set_footer(text="Aincrad Media Verification System")
 
-                view = MediaModerationView(
-                    author_id=message.author.id,
-                    channel_id=message.channel.id,
-                    content_text=message.content,
-                    files_data=files_data
-                )
-                await mod_channel.send(embed=mod_embed, view=view)
+                    view = MediaModerationView(
+                        author_id=message.author.id,
+                        channel_id=message.channel.id,
+                        content_text=message.content,
+                        files_data=files_data
+                    )
+                    await mod_channel.send(embed=mod_embed, view=view)
 
-            await message.delete()
-        except Exception as e:
-            print(f"[ПРЕМОДЕРАЦИЯ ОШИБКА] {e}")
-        return
+                await message.delete()
+            except Exception as e:
+                print(f"[ПРЕМОДЕРАЦИЯ ОШИБКА] {e}")
+            return
 
     # Стандартное начисление опыта для обычных сообщений
     await add_xp(message, message.author.id, random.randint(2, 5))
