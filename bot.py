@@ -40,7 +40,7 @@ MAINTENANCE_MODE = False
 
 # --- НАСТРОЙКИ КАНАЛОВ КОНТЕНТА И АВТОМОДА ---
 MEDIA_CHANNELS = [1529472211730043012, 1534785295696789634, 1534785127572443246, 1534550233315414169]
-MEDIA_LOG_CHANNEL_ID = 1534789085582065794
+MEDIA_LOG_CHANNEL_ID = 1534789085582065794 # Канал #проверка-медиа для премодерации
 STREAM_CHANNEL_ID = 1534785474739179530
 AUTO_MOD_LOG_CHANNEL_ID = 1529472394102706336
 
@@ -200,6 +200,83 @@ async def on_ready():
     await bot.tree.sync()
     print(f"Бот {bot.user} запущен и полностью готов к работе в Айнкраде!")
 
+# --- КНОПКИ ПРЕМОДЕРАЦИИ МЕДИА ---
+class MediaModerationView(discord.ui.View):
+    def __init__(self, author_id: int, channel_id: int, content_text: str, attachments_data: list):
+        super().__init__(timeout=None)
+        self.author_id = author_id
+        self.channel_id = channel_id
+        self.content_text = content_text
+        self.attachments_data = attachments_data  # Список байтов/файлов или их URL
+
+    @discord.ui.button(label="Принять", style=discord.ButtonStyle.green, emoji="✅")
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin_or_mod(interaction.user):
+            return await interaction.response.send_message("❌ У вас нет прав для модерации контента!", ephemeral=True)
+
+        target_channel = interaction.guild.get_channel(self.channel_id)
+        if not target_channel:
+            return await interaction.response.send_message("❌ Целевой канал не найден!", ephemeral=True)
+
+        try:
+            webhooks = await target_channel.webhooks()
+            webhook = discord.utils.get(webhooks, name="Yui Media")
+            if not webhook:
+                webhook = await target_channel.create_webhook(name="Yui Media")
+
+            files = []
+            for att_url in self.attachments_data:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(att_url) as resp:
+                        if resp.status == 200:
+                            data = io.BytesIO(await resp.read())
+                            files.append(discord.File(data, filename=att_url.split("/")[-1].split("?")[0]))
+
+            post_content = f"**Отправил:** <@{self.author_id}>"
+            if self.content_text:
+                post_content += f"\n\n{self.content_text}"
+
+            sent_message = await webhook.send(
+                content=post_content,
+                files=files if files else [],
+                username="Yui",
+                avatar_url=bot.user.display_avatar.url,
+                wait=True
+            )
+            await sent_message.add_reaction("❤️")
+
+            # Обновляем лог-сообщение
+            embed = interaction.message.embeds[0]
+            embed.color = 0x2ECC71
+            embed.title = "✅ МЕДИАКОНТЕНТ ОДОБРЕН И ОПУБЛИКОВАН"
+            embed.add_field(name="Одобрил", value=interaction.user.mention, inline=False)
+            embed.add_field(name="Ссылка на пост", value=f"[Перейти к посту]({sent_message.jump_url})", inline=False)
+
+            for child in self.children:
+                child.disabled = True
+            await interaction.response.edit_message(embed=embed, view=self)
+
+            # Начисляем опыт автору
+            await add_xp(interaction, self.author_id, random.randint(2, 5))
+
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Ошибка публикации: {e}", ephemeral=True)
+
+    @discord.ui.button(label="Отклонить", style=discord.ButtonStyle.red, emoji="❌")
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin_or_mod(interaction.user):
+            return await interaction.response.send_message("❌ У вас нет прав для модерации контента!", ephemeral=True)
+
+        embed = interaction.message.embeds[0]
+        embed.color = 0xE74C3C
+        embed.title = "❌ МЕДИАКОНТЕНТ ОТКЛОНЕН"
+        embed.add_field(name="Отклонил", value=interaction.user.mention, inline=False)
+
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(embed=embed, view=self)
+
+
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild:
@@ -233,8 +310,12 @@ async def on_message(message):
         ]
         is_gif_or_media_link = any(domain in content_lower for domain in safe_domains) or ".gif" in content_lower
         
-        # Проверка стриминговых ссылок
-        stream_platforms = ["twitch.tv", "youtube.com/live", "youtube.com/@", "kick.com", "trovo.live", "vkplay.live", "youtube.com/watch"]
+        # Популярные стриминговые и видео платформы (для стримов и роликов)
+        stream_platforms = [
+            "twitch.tv", "youtube.com/live", "youtube.com/@", "kick.com", 
+            "trovo.live", "vkplay.live", "youtube.com/watch", "youtu.be", 
+            "tiktok.com", "vk.com/video"
+        ]
         has_stream_link = any(plat in content_lower for plat in stream_platforms)
 
         has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
@@ -247,6 +328,10 @@ async def on_message(message):
         
         is_media_channel = message.channel.id in MEDIA_CHANNELS
         is_stream_channel = message.channel.id == STREAM_CHANNEL_ID
+        
+        # ID канала #ролики (возьмем второе id из твоего массива MEDIA_CHANNELS, либо можешь вынести в переменную)
+        VIDEO_CHANNEL_ID = 1534785295696789634 
+        is_video_channel = message.channel.id == VIDEO_CHANNEL_ID
 
         user_id = message.author.id
         current_time = time.time()
@@ -279,11 +364,15 @@ async def on_message(message):
         elif is_caps_spam:
             violation_reason = "Чрезмерное использование капса (Caps Lock Spam)"
             
-        # Запрет обычного текста в медиа-каналах
-        elif is_media_channel and total_attachments == 0 and not is_gif_or_media_link:
+        # Запрет пустого текста в медиа-каналах (если нет файлов и гифок)
+        elif is_media_channel and not is_video_channel and total_attachments == 0 and not is_gif_or_media_link:
             violation_reason = "В медиа-зоны разрешено отправлять только картинки, видео или гифки!"
             
-        # Запрет обычного текста без ссылки в канале стримов
+        # В канале #ролики разрешаем текст + ссылки на видео
+        elif is_video_channel and not has_stream_link and total_attachments == 0 and not is_gif_or_media_link:
+            violation_reason = "В канал #ролики можно публиковать только ссылки на ролики/видео или медиафайлы!"
+            
+        # Стриминговый канал пропускает ссылки на стримы напрямую без премодерации
         elif is_stream_channel and not has_stream_link:
             violation_reason = "В канал #стримы можно публиковать только ссылки на трансляции (Twitch, Kick, YouTube)!"
 
@@ -320,52 +409,39 @@ async def on_message(message):
                         pass
             return
 
-    # --- WEBHOOK ПЕРЕХВАТЧИК ДЛЯ МЕДИА (ЕСЛИ НЕТ НАРУШЕНИЙ) ---
+    # --- ПРЕМОДЕРАЦИЯ МЕДИАКОНТЕНТА ---
     is_media = message.channel.id in MEDIA_CHANNELS
-    is_media_content = message.attachments or (".gif" in message.content.lower()) or ("tenor.com" in message.content.lower())
+    is_media_content = message.attachments or (".gif" in message.content.lower()) or ("tenor.com" in message.content.lower()) or (".mp4" in message.content.lower())
     
     if is_media and is_media_content and not violation_reason:
         try:
-            webhooks = await message.channel.webhooks()
-            webhook = discord.utils.get(webhooks, name="Cardinal Media")
-            if not webhook:
-                webhook = await message.channel.create_webhook(name="Cardinal Media")
-
-            files = []
-            for attachment in message.attachments:
-                files.append(await attachment.to_file())
-
-            content = f"**Отправил:** {message.author.mention}"
-            if message.content:
-                content += f"\n\n{message.content}"
-
-            sent_message = await webhook.send(
-                content=content,
-                files=files,
-                username="Кардинал APP",
-                avatar_url=bot.user.display_avatar.url,
-                wait=True
-            )
-            await sent_message.add_reaction("❤️")
-
-            # Теневое логирование
-            shadow_log = bot.get_channel(MEDIA_LOG_CHANNEL_ID)
-            if shadow_log:
-                log_text = (
-                    f"⚠️ **Лог медиа-зоны**\n"
-                    f"**Игрок:** {message.author.mention} (`{message.author.id}`)\n"
-                    f"**Канал:** {message.channel.mention}\n"
-                    f"**Ссылка на пост:** {sent_message.jump_url}"
+            mod_channel = bot.get_channel(MEDIA_LOG_CHANNEL_ID)
+            if mod_channel:
+                attachments_urls = [att.url for att in message.attachments]
+                
+                mod_embed = discord.Embed(
+                    title="🔍 ПРЕМОДЕРАЦИЯ МЕДИАКОНТЕНТА",
+                    description=f"**Автор:** {message.author.mention} (`{message.author.id}`)\n**Канал:** {message.channel.mention}",
+                    color=0xF1C40F
                 )
-                await shadow_log.send(log_text)
+                if message.content:
+                    mod_embed.add_field(name="Текст сообщения", value=message.content, inline=False)
+                if attachments_urls:
+                    mod_embed.set_image(url=attachments_urls[0])
+                
+                mod_embed.set_footer(text="Aincrad Media Verification System")
+
+                view = MediaModerationView(
+                    author_id=message.author.id,
+                    channel_id=message.channel.id,
+                    content_text=message.content,
+                    attachments_data=attachments_urls
+                )
+                await mod_channel.send(embed=mod_embed, view=view)
 
             await message.delete()
         except Exception as e:
-            print(f"[WEBHOOK ОШИБКА] {e}")
-            
-        # Начисляем опыт за красивый пост через webhook и останавливаем код
-        await add_xp(message, message.author.id, random.randint(2, 5))
-        await bot.process_commands(message)
+            print(f"[ПРЕМОДЕРАЦИЯ ОШИБКА] {e}")
         return
 
     # Стандартное начисление опыта для обычных сообщений
