@@ -20,12 +20,12 @@ custom_roles_collection = db.custom_roles
 auction_collection = db.auction_roles
 titles_collection = db.user_titles
 guilds_collection = db.guilds
-guild_requests_collection = db.guilds_collection if hasattr(db, 'guild_requests') else db.guild_requests # Коллекция для логов и заявок гильдий
+guild_requests_collection = db.guilds_collection if hasattr(db, 'guild_requests') else db.guild_requests
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-intents.voice_states = True # ВАЖНО: Включено для отслеживания войс-активности
+intents.voice_states = True 
 
 # Оптимизация памяти для хостинга
 bot = commands.Bot(
@@ -38,20 +38,19 @@ bot = commands.Bot(
 # Глобальный флаг режима техобслуживания
 MAINTENANCE_MODE = False
 
-# --- НАСТРОЙКИ АВТОМОДА ДЛЯ МЕДИА ---
-MEDIA_CHANNEL_ID = None
+# --- НАСТРОЙКИ КАНАЛОВ КОНТЕНТА И АВТОМОДА ---
+MEDIA_CHANNELS = [1529472211730043012, 1534785295696789634, 1534785127572443246, 1534550233315414169]
+MEDIA_LOG_CHANNEL_ID = 1534789085582065794
+STREAM_CHANNEL_ID = 1534785474739179530
+AUTO_MOD_LOG_CHANNEL_ID = 1529472394102706336
 
 # --- СЛОВАРИ ДЛЯ ANTI-AFK И АВТОМОДЕРАЦИИ ---
-voice_start_times = {} # Время начала активной фазы
-voice_accumulated = {} # Накопленное чистое время за сессию
-
-# --- СЛОВАРИ ДЛЯ АВТОМОДА ---
+voice_start_times = {} 
+voice_accumulated = {} 
 user_last_message_time = {}
 user_message_timestamps = {}
 user_message_history = {}
-log_cooldowns = {} # Защита от заспамливания самого канала логов
-
-AUTO_MOD_LOG_CHANNEL_ID = 1529472394102706336
+log_cooldowns = {} 
 
 def get_or_create_user(user_id):
     user = users_collection.find_one({"_id": user_id})
@@ -68,7 +67,7 @@ def get_or_create_user(user_id):
             "streak": 0,
             "guild_id": None,
             "special_title": "Отсутствует",
-            "voice_time": 0.0 # Новое поле для хранения времени в войсе (в секундах)
+            "voice_time": 0.0 
         }
         users_collection.insert_one(new_user)
         return 100, 0, 1, 0.0, 0.0, 0.0, 0.0, 0, None, 'Отсутствует', 0.0
@@ -223,6 +222,8 @@ async def on_message(message):
             is_privileged = True
 
     # --- УМНАЯ АВТОМОДЕРАЦИЯ И АНТИ-СПАМ ---
+    violation_reason = None
+    
     if not is_privileged:
         content_lower = message.content.lower().strip()
         
@@ -231,16 +232,21 @@ async def on_message(message):
             "discord.com", "pinimg.com", "klipy.com", "alphacoders.com"
         ]
         is_gif_or_media_link = any(domain in content_lower for domain in safe_domains) or ".gif" in content_lower
+        
+        # Проверка стриминговых ссылок
+        stream_platforms = ["twitch.tv", "youtube.com/live", "youtube.com/@", "kick.com", "trovo.live", "vkplay.live", "youtube.com/watch"]
+        has_stream_link = any(plat in content_lower for plat in stream_platforms)
 
         has_invite = "discord.gg/" in content_lower or "discord.com/invite" in content_lower or "invite.gg/" in content_lower
-        
         is_raw_url = "http://" in content_lower or "https://" in content_lower or "www." in content_lower or ".com" in content_lower or ".ru" in content_lower or ".net" in content_lower
-        has_link = is_raw_url and not is_gif_or_media_link
+        has_link = is_raw_url and not is_gif_or_media_link and not has_stream_link
         
         has_mass_ping = "@everyone" in message.content or "@here" in message.content
         total_attachments = len(message.attachments)
         is_mass_image_spam = total_attachments >= 3 and not is_gif_or_media_link
-        is_media_channel = MEDIA_CHANNEL_ID is not None and message.channel.id == MEDIA_CHANNEL_ID
+        
+        is_media_channel = message.channel.id in MEDIA_CHANNELS
+        is_stream_channel = message.channel.id == STREAM_CHANNEL_ID
 
         user_id = message.author.id
         current_time = time.time()
@@ -260,7 +266,6 @@ async def on_message(message):
             if (caps_count / len(letters)) > 0.7:
                 is_caps_spam = True
 
-        violation_reason = None
         if has_invite:
             violation_reason = "Попытка публикации стороннего инвайта"
         elif has_link:
@@ -273,6 +278,14 @@ async def on_message(message):
             violation_reason = "Слишком быстрый флуд (превышен лимит КД 1.5 сек)"
         elif is_caps_spam:
             violation_reason = "Чрезмерное использование капса (Caps Lock Spam)"
+            
+        # Запрет обычного текста в медиа-каналах
+        elif is_media_channel and total_attachments == 0 and not is_gif_or_media_link:
+            violation_reason = "В медиа-зоны разрешено отправлять только картинки, видео или гифки!"
+            
+        # Запрет обычного текста без ссылки в канале стримов
+        elif is_stream_channel and not has_stream_link:
+            violation_reason = "В канал #стримы можно публиковать только ссылки на трансляции (Twitch, Kick, YouTube)!"
 
         if violation_reason:
             try:
@@ -303,10 +316,59 @@ async def on_message(message):
                     log_embed.set_footer(text="Aincrad Security Shield • Сообщение удалено")
                     try:
                         await log_channel.send(embed=log_embed)
-                    except Exception:
+                    except:
                         pass
             return
 
+    # --- WEBHOOK ПЕРЕХВАТЧИК ДЛЯ МЕДИА (ЕСЛИ НЕТ НАРУШЕНИЙ) ---
+    is_media = message.channel.id in MEDIA_CHANNELS
+    is_media_content = message.attachments or (".gif" in message.content.lower()) or ("tenor.com" in message.content.lower())
+    
+    if is_media and is_media_content and not violation_reason:
+        try:
+            webhooks = await message.channel.webhooks()
+            webhook = discord.utils.get(webhooks, name="Cardinal Media")
+            if not webhook:
+                webhook = await message.channel.create_webhook(name="Cardinal Media")
+
+            files = []
+            for attachment in message.attachments:
+                files.append(await attachment.to_file())
+
+            content = f"**Отправил:** {message.author.mention}"
+            if message.content:
+                content += f"\n\n{message.content}"
+
+            sent_message = await webhook.send(
+                content=content,
+                files=files,
+                username="Кардинал APP",
+                avatar_url=bot.user.display_avatar.url,
+                wait=True
+            )
+            await sent_message.add_reaction("❤️")
+
+            # Теневое логирование
+            shadow_log = bot.get_channel(MEDIA_LOG_CHANNEL_ID)
+            if shadow_log:
+                log_text = (
+                    f"⚠️ **Лог медиа-зоны**\n"
+                    f"**Игрок:** {message.author.mention} (`{message.author.id}`)\n"
+                    f"**Канал:** {message.channel.mention}\n"
+                    f"**Ссылка на пост:** {sent_message.jump_url}"
+                )
+                await shadow_log.send(log_text)
+
+            await message.delete()
+        except Exception as e:
+            print(f"[WEBHOOK ОШИБКА] {e}")
+            
+        # Начисляем опыт за красивый пост через webhook и останавливаем код
+        await add_xp(message, message.author.id, random.randint(2, 5))
+        await bot.process_commands(message)
+        return
+
+    # Стандартное начисление опыта для обычных сообщений
     await add_xp(message, message.author.id, random.randint(2, 5))
     await bot.process_commands(message)
 
@@ -396,6 +458,7 @@ async def on_voice_state_update(member, before, after):
             await member.send(embed=embed)
         except Exception:
             pass
+
 @bot.event
 async def on_member_join(member: discord.Member):
     role = discord.utils.get(member.guild.roles, name="unverify") 
