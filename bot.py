@@ -1,4 +1,6 @@
 import os
+import aiohttp
+import io
 import certifi
 import random
 import time
@@ -207,7 +209,7 @@ class MediaModerationView(discord.ui.View):
         self.author_id = author_id
         self.channel_id = channel_id
         self.content_text = content_text
-        self.attachments_data = attachments_data  # Список байтов/файлов или их URL
+        self.attachments_data = attachments_data
 
     @discord.ui.button(label="Принять", style=discord.ButtonStyle.green, emoji="✅")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -245,7 +247,6 @@ class MediaModerationView(discord.ui.View):
             )
             await sent_message.add_reaction("❤️")
 
-            # Обновляем лог-сообщение
             embed = interaction.message.embeds[0]
             embed.color = 0x2ECC71
             embed.title = "✅ МЕДИАКОНТЕНТ ОДОБРЕН И ОПУБЛИКОВАН"
@@ -256,7 +257,6 @@ class MediaModerationView(discord.ui.View):
                 child.disabled = True
             await interaction.response.edit_message(embed=embed, view=self)
 
-            # Начисляем опыт автору
             await add_xp(interaction, self.author_id, random.randint(2, 5))
 
         except Exception as e:
