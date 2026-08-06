@@ -1,10 +1,10 @@
 import os
-import aiohttp
 import io
 import certifi
 import random
 import time
 import asyncio
+import aiohttp
 import discord
 from pymongo import MongoClient
 from discord import app_commands
@@ -41,7 +41,9 @@ bot = commands.Bot(
 MAINTENANCE_MODE = False
 
 # --- НАСТРОЙКИ КАНАЛОВ КОНТЕНТА И АВТОМОДА ---
-MEDIA_CHANNELS = [1529472211730043012, 1534785295696789634, 1534785127572443246, 1534550233315414169]
+# Убираем канал #ролики из MEDIA_CHANNELS, оставляя его под чисто текстово-видеомодерацию
+MEDIA_CHANNELS = [1534785295696789634, 1534785127572443246, 1534550233315414169] # Только каналы с мемами/артами (без #ролики)
+VIDEO_CHANNEL_ID = 1529472211730043012 # ID канала #ролики
 MEDIA_LOG_CHANNEL_ID = 1534789085582065794 # Канал #проверка-медиа для премодерации
 STREAM_CHANNEL_ID = 1534785474739179530
 AUTO_MOD_LOG_CHANNEL_ID = 1529472394102706336
@@ -310,7 +312,7 @@ async def on_message(message):
         ]
         is_gif_or_media_link = any(domain in content_lower for domain in safe_domains) or ".gif" in content_lower
         
-        # Популярные стриминговые и видео платформы (для стримов и роликов)
+        # Стриминговые и видео платформы
         stream_platforms = [
             "twitch.tv", "youtube.com/live", "youtube.com/@", "kick.com", 
             "trovo.live", "vkplay.live", "youtube.com/watch", "youtu.be", 
@@ -328,9 +330,6 @@ async def on_message(message):
         
         is_media_channel = message.channel.id in MEDIA_CHANNELS
         is_stream_channel = message.channel.id == STREAM_CHANNEL_ID
-        
-        # ID канала #ролики (возьмем второе id из твоего массива MEDIA_CHANNELS, либо можешь вынести в переменную)
-        VIDEO_CHANNEL_ID = 1534785295696789634 
         is_video_channel = message.channel.id == VIDEO_CHANNEL_ID
 
         user_id = message.author.id
@@ -364,15 +363,11 @@ async def on_message(message):
         elif is_caps_spam:
             violation_reason = "Чрезмерное использование капса (Caps Lock Spam)"
             
-        # Запрет пустого текста в медиа-каналах (если нет файлов и гифок)
-        elif is_media_channel and not is_video_channel and total_attachments == 0 and not is_gif_or_media_link:
+        # Запреты по конкретным каналам:
+        elif is_media_channel and total_attachments == 0 and not is_gif_or_media_link:
             violation_reason = "В медиа-зоны разрешено отправлять только картинки, видео или гифки!"
-            
-        # В канале #ролики разрешаем текст + ссылки на видео
         elif is_video_channel and not has_stream_link and total_attachments == 0 and not is_gif_or_media_link:
             violation_reason = "В канал #ролики можно публиковать только ссылки на ролики/видео или медиафайлы!"
-            
-        # Стриминговый канал пропускает ссылки на стримы напрямую без премодерации
         elif is_stream_channel and not has_stream_link:
             violation_reason = "В канал #стримы можно публиковать только ссылки на трансляции (Twitch, Kick, YouTube)!"
 
@@ -409,7 +404,7 @@ async def on_message(message):
                         pass
             return
 
-    # --- ПРЕМОДЕРАЦИЯ МЕДИАКОНТЕНТА ---
+    # --- ПРЕМОДЕРАЦИЯ МЕДИАКОНТЕНТА (Только для реальных медиафайлов/гифок в медиа-каналах) ---
     is_media = message.channel.id in MEDIA_CHANNELS
     is_media_content = message.attachments or (".gif" in message.content.lower()) or ("tenor.com" in message.content.lower()) or (".mp4" in message.content.lower())
     
