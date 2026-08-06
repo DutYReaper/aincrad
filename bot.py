@@ -41,8 +41,7 @@ bot = commands.Bot(
 MAINTENANCE_MODE = False
 
 # --- НАСТРОЙКИ КАНАЛОВ КОНТЕНТА И АВТОМОДА ---
-# Убираем канал #ролики из MEDIA_CHANNELS, оставляя его под чисто текстово-видеомодерацию
-MEDIA_CHANNELS = [1534785295696789634, 1534785127572443246, 1534550233315414169] # Только каналы с мемами/артами (без #ролики)
+MEDIA_CHANNELS = [1534785295696789634, 1534785127572443246, 1534550233315414169] # Каналы с мемами/артами
 VIDEO_CHANNEL_ID = 1529472211730043012 # ID канала #ролики
 MEDIA_LOG_CHANNEL_ID = 1534789085582065794 # Канал #проверка-медиа для премодерации
 STREAM_CHANNEL_ID = 1534785474739179530
@@ -204,14 +203,14 @@ async def on_ready():
     await bot.tree.sync()
     print(f"Бот {bot.user} запущен и полностью готов к работе в Айнкраде!")
 
-# --- КНОПКИ ПРЕМОДЕРАЦИИ МЕДИА ---
+# --- КНОПКИ ПРЕМОДЕРАЦИИ МЕДИА И РОЛИКОВ ---
 class MediaModerationView(discord.ui.View):
-    def __init__(self, author_id: int, channel_id: int, content_text: str, attachments_data: list):
+    def __init__(self, author_id: int, channel_id: int, content_text: str, files_data: list):
         super().__init__(timeout=None)
         self.author_id = author_id
         self.channel_id = channel_id
         self.content_text = content_text
-        self.attachments_data = attachments_data
+        self.files_data = files_data  # Список сохраненных байтов файлов
 
     @discord.ui.button(label="Принять", style=discord.ButtonStyle.green, emoji="✅")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -228,13 +227,8 @@ class MediaModerationView(discord.ui.View):
             if not webhook:
                 webhook = await target_channel.create_webhook(name="Yui Media")
 
-            files = []
-            for att_url in self.attachments_data:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(att_url) as resp:
-                        if resp.status == 200:
-                            data = io.BytesIO(await resp.read())
-                            files.append(discord.File(data, filename=att_url.split("/")[-1].split("?")[0]))
+            # Восстанавливаем файлы из сохраненных байтов без потери ссылок
+            prepared_files = [discord.File(io.BytesIO(f["bytes"]), filename=f["filename"]) for f in self.files_data]
 
             post_content = f"**Отправил:** <@{self.author_id}>"
             if self.content_text:
@@ -242,16 +236,19 @@ class MediaModerationView(discord.ui.View):
 
             sent_message = await webhook.send(
                 content=post_content,
-                files=files if files else [],
+                files=prepared_files if prepared_files else [],
                 username="Yui",
                 avatar_url=bot.user.display_avatar.url,
                 wait=True
             )
-            await sent_message.add_reaction("❤️")
+            try:
+                await sent_message.add_reaction("❤️")
+            except:
+                pass
 
             embed = interaction.message.embeds[0]
             embed.color = 0x2ECC71
-            embed.title = "✅ МЕДИАКОНТЕНТ ОДОБРЕН И ОПУБЛИКОВАН"
+            embed.title = "✅ КОНТЕНТ ОДОБРЕН И ОПУБЛИКОВАН"
             embed.add_field(name="Одобрил", value=interaction.user.mention, inline=False)
             embed.add_field(name="Ссылка на пост", value=f"[Перейти к посту]({sent_message.jump_url})", inline=False)
 
@@ -271,7 +268,7 @@ class MediaModerationView(discord.ui.View):
 
         embed = interaction.message.embeds[0]
         embed.color = 0xE74C3C
-        embed.title = "❌ МЕДИАКОНТЕНТ ОТКЛОНЕН"
+        embed.title = "❌ КОНТЕНТ ОТКЛОНЕН"
         embed.add_field(name="Отклонил", value=interaction.user.mention, inline=False)
 
         for child in self.children:
@@ -312,7 +309,6 @@ async def on_message(message):
         ]
         is_gif_or_media_link = any(domain in content_lower for domain in safe_domains) or ".gif" in content_lower
         
-        # Стриминговые и видео платформы
         stream_platforms = [
             "twitch.tv", "youtube.com/live", "youtube.com/@", "kick.com", 
             "trovo.live", "vkplay.live", "youtube.com/watch", "youtu.be", 
@@ -363,7 +359,7 @@ async def on_message(message):
         elif is_caps_spam:
             violation_reason = "Чрезмерное использование капса (Caps Lock Spam)"
             
-        # Запреты по конкретным каналам:
+        # Запреты по каналам:
         elif is_media_channel and total_attachments == 0 and not is_gif_or_media_link:
             violation_reason = "В медиа-зоны разрешено отправлять только картинки, видео или гифки!"
         elif is_video_channel and not has_stream_link and total_attachments == 0 and not is_gif_or_media_link:
@@ -404,25 +400,29 @@ async def on_message(message):
                         pass
             return
 
-    # --- ПРЕМОДЕРАЦИЯ МЕДИАКОНТЕНТА (Только для реальных медиафайлов/гифок в медиа-каналах) ---
-    is_media = message.channel.id in MEDIA_CHANNELS
-    is_media_content = message.attachments or (".gif" in message.content.lower()) or ("tenor.com" in message.content.lower()) or (".mp4" in message.content.lower())
+    # --- ПРЕМОДЕРАЦИЯ МЕДИАКОНТЕНТА И РОЛИКОВ ---
+    is_media_zone = message.channel.id in MEDIA_CHANNELS or message.channel.id == VIDEO_CHANNEL_ID
+    has_media_attachments = len(message.attachments) > 0
+    has_media_links = (".gif" in message.content.lower()) or ("tenor.com" in message.content.lower()) or (".mp4" in message.content.lower()) or has_stream_link
     
-    if is_media and is_media_content and not violation_reason:
+    if is_media_zone and (has_media_attachments or has_media_links) and not violation_reason:
         try:
             mod_channel = bot.get_channel(MEDIA_LOG_CHANNEL_ID)
             if mod_channel:
-                attachments_urls = [att.url for att in message.attachments]
-                
+                files_data = []
+                for att in message.attachments:
+                    file_bytes = await att.read()
+                    files_data.append({"bytes": file_bytes, "filename": att.filename})
+
                 mod_embed = discord.Embed(
-                    title="🔍 ПРЕМОДЕРАЦИЯ МЕДИАКОНТЕНТА",
+                    title="🔍 ПРЕМОДЕРАЦИЯ КОНТЕНТА",
                     description=f"**Автор:** {message.author.mention} (`{message.author.id}`)\n**Канал:** {message.channel.mention}",
                     color=0xF1C40F
                 )
                 if message.content:
-                    mod_embed.add_field(name="Текст сообщения", value=message.content, inline=False)
-                if attachments_urls:
-                    mod_embed.set_image(url=attachments_urls[0])
+                    mod_embed.add_field(name="Текст / Ссылка", value=message.content, inline=False)
+                if message.attachments:
+                    mod_embed.set_image(url=message.attachments[0].url)
                 
                 mod_embed.set_footer(text="Aincrad Media Verification System")
 
@@ -430,7 +430,7 @@ async def on_message(message):
                     author_id=message.author.id,
                     channel_id=message.channel.id,
                     content_text=message.content,
-                    attachments_data=attachments_urls
+                    files_data=files_data
                 )
                 await mod_channel.send(embed=mod_embed, view=view)
 
