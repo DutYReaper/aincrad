@@ -559,13 +559,12 @@ async def on_member_join(member: discord.Member):
             color=0x00BFFF
         )
         embed.set_thumbnail(url=member.display_avatar.url)
+        # Гифка встроена в сам эмбед как большой баннер (бэгги стайл)
+        embed.set_image(url="https://media.tenor.com/6U-LqU4s2oEAAAAC/sword-art-online-kirito.gif")
         embed.set_footer(text="Aincrad Cardinal System")
         
-        # Гифка отправляется в основе сообщения вместе с пингом (как ты и просил)
-        gif_url = "https://i.pinimg.com/originals/a4/96/8c/a4968ce61d7b0032e5734e0298a00223.gif"
-        
         try:
-            await welcome_channel.send(content=f"{member.mention}\n{gif_url}", embed=embed)
+            await welcome_channel.send(content=member.mention, embed=embed)
         except Exception as e:
             print(f"[ОШИБКА ПРИВЕТСТВИЯ] Не удалось отправить сообщение: {e}")
 
@@ -1074,8 +1073,8 @@ async def shop(interaction: discord.Interaction):
         description="Добро пожаловать в торговый интерфейс системы. Выберите нужную привилегию для покупки с помощью кнопок ниже.", 
         color=0x00BFFF
     )
-    # Использована надежная ссылка с img/gif хостинга, чтобы отображалась красивым баннером
-    embed.set_image(url="https://i.pinimg.com/originals/1d/18/84/1d18847cc0eec131b09b552277d3f820.gif")
+    # Заменено на надежную ссылку Tenor
+    embed.set_image(url="https://media.tenor.com/D_i-i_lXw1QAAAAC/sao-agil.gif")
     embed.add_field(
         name="🛡️ Элитный статус «Неприкасаемый»", 
         value="```fix\nСтоимость: 15,000 Колов\n```\nОбеспечивает абсолютный и бессрочный иммунитет от любых попыток карманных краж и грабежей другими игроками.", 
@@ -1093,7 +1092,7 @@ async def shop(interaction: discord.Interaction):
     )
     embed.set_footer(text="Aincrad Economy System • Используйте кнопки интерфейса для взаимодействия")
     await interaction.response.send_message(embed=embed, view=ShopButtonsView())
-
+    
 class EditRoleModal(discord.ui.Modal, title="Редактирование кастомной роли"):
     role_name = discord.ui.TextInput(label="Новое название роли", max_length=50)
     role_color = discord.ui.TextInput(label="Новый HEX-цвет (без #)", placeholder="FF5733", max_length=6, min_length=6)
@@ -1596,10 +1595,9 @@ async def guild_menu(interaction: discord.Interaction):
         description="Используйте кнопки ниже для взаимодействия:", 
         color=0x9B59B6
     )
-    # Использована надежная ссылка с img/gif хостинга
-    embed.set_image(url="https://i.pinimg.com/originals/e0/f8/f0/e0f8f0abdf81e9f193fcc25ed1d368d0.gif")
+    # Заменено на надежную ссылку Tenor
+    embed.set_image(url="https://media.tenor.com/V-E-j1tXb8sAAAAC/sword-art-online-sao.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
-
 
 # --- АУКЦИОН РОЛЕЙ (ЕДИНОЕ МЕНЮ С ПАГИНАЦИЕЙ И ФИКСАМИ) ---
 
