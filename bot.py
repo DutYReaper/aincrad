@@ -550,7 +550,7 @@ async def on_member_join(member: discord.Member):
         except Exception:
             pass
 
-    # 2. Красивое приветствие в канал (прямая gif ссылка)
+    # 2. Приветствие (используем твою гифку для приветствий)
     welcome_channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
     if welcome_channel:
         embed = discord.Embed(
@@ -559,7 +559,7 @@ async def on_member_join(member: discord.Member):
             color=0x00BFFF
         )
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.set_image(url="https://i.imgur.com/83UqQjT.gif")
+        embed.set_image(url="https://media1.tenor.com/m/zLQ4_cEQY0AAAAAC/sao.gif")
         embed.set_footer(text="Aincrad Cardinal System")
         
         try:
@@ -793,14 +793,14 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
     embed_res = discord.Embed(title="🕵️ РЕЗУЛЬТАТ ОГРАБЛЕНИЯ")
 
     if success:
-        embed_res.set_image(url="https://i.imgur.com/83UqQjT.gif")
+        embed_res.set_image(url="https://media1.tenor.com/m/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
         users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": potential_amount}})
         users_collection.update_one({"_id": member.id}, {"$inc": {"coins": -potential_amount}})
         await add_xp(interaction, attacker.id, 20)
         embed_res.description = f"🎉 Успех! Вы ювелирно вытащили **+{potential_amount:,} Колов** у {member.mention}!"
         embed_res.color = 0x2ECC71
     else:
-        embed_res.set_image(url="https://i.imgur.com/v2Z2v3v.gif")
+        embed_res.set_image(url="https://media1.tenor.com/m/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
         users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": -potential_amount}})
         embed_res.description = f"🚨 Вас заметили! Вы выплатили штраф в размере **-{potential_amount:,} Колов**."
         embed_res.color = 0xE74C3C
@@ -832,7 +832,7 @@ class DuelAcceptView(discord.ui.View):
             return await interaction.followup.send("❌ У одного из участников больше нет нужной суммы на счете!", ephemeral=True)
 
         embed_loading = discord.Embed(title="⚔️ АРЕНА ДУЭЛЕЙ АЙНКРАДА", description=f"Скрещены клинки между {self.challenger.mention} и {self.target.mention}!\nСтавка матча: **{self.amount:,} Колов**.", color=0xE67E22)
-        embed_loading.set_image(url="https://i.imgur.com/83UqQjT.gif")
+        embed_loading.set_image(url="https://media1.tenor.com/m/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
         msg = await interaction.followup.send(embed=embed_loading)
         await asyncio.sleep(3.0)
 
@@ -890,7 +890,7 @@ async def dice(interaction: discord.Interaction, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🎲 ИГРАЛЬНЫЕ КОСТИ", description="Ставки сделаны. Кости выбрасываются на игровой стол...", color=0x9B59B6)
-    embed_loading.set_image(url="https://i.imgur.com/83UqQjT.gif")
+    embed_loading.set_image(url="https://media1.tenor.com/m/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
@@ -929,7 +929,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🪙 ОРЕЛ И РЕШКА", description="Монета подброшена высоко в воздух...", color=0xF1C40F)
-    embed_loading.set_image(url="https://i.imgur.com/83UqQjT.gif")
+    embed_loading.set_image(url="https://media1.tenor.com/m/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
@@ -960,7 +960,7 @@ async def roulette(interaction: discord.Interaction, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🎯 РУССКАЯ РУЛЕТКА", description="Барабан револьвера заряжен и начинает вращение...", color=0xE74C3C)
-    embed_loading.set_image(url="https://i.imgur.com/83UqQjT.gif")
+    embed_loading.set_image(url="https://media1.tenor.com/m/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
@@ -1072,8 +1072,8 @@ async def shop(interaction: discord.Interaction):
         description="Добро пожаловать в торговый интерфейс системы. Выберите нужную привилегию для покупки с помощью кнопок ниже.", 
         color=0x00BFFF
     )
-    # Прямая gif ссылка для магазина
-    embed.set_image(url="https://i.imgur.com/83UqQjT.gif")
+    # Гифка для /shop
+    embed.set_image(url="https://media1.tenor.com/m/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     embed.add_field(
         name="🛡️ Элитный статус «Неприкасаемый»", 
         value="```fix\nСтоимость: 15,000 Колов\n```\nОбеспечивает абсолютный и бессрочный иммунитет от любых попыток карманных краж и грабежей другими игроками.", 
@@ -1594,8 +1594,8 @@ async def guild_menu(interaction: discord.Interaction):
         description="Используйте кнопки ниже для взаимодействия:", 
         color=0x9B59B6
     )
-    # Исправленная правильная гифка SAO для команды /guild
-    embed.set_image(url="https://i.imgur.com/v2Z2v3v.gif")
+    # Гифка для /guild
+    embed.set_image(url="https://media1.tenor.com/m/BE70MWMOpkEAAAAC/yuukis-sword-sao.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 # --- АУКЦИОН РОЛЕЙ (ЕДИНОЕ МЕНЮ С ПАГИНАЦИЕЙ И ФИКСАМИ) ---
@@ -1792,7 +1792,7 @@ async def auction(interaction: discord.Interaction):
 class NewsModal(discord.ui.Modal, title="Создание системной новости"):
     news_title = discord.ui.TextInput(label="Заголовок новости", placeholder="СИСТЕМНОЕ ОБНОВЛЕНИЕ", max_length=100)
     news_text = discord.ui.TextInput(label="Основной текст", style=discord.TextStyle.paragraph, placeholder="Добавил пару фишек...\n\n| 🔻 Роли...")
-    news_gif = discord.ui.TextInput(label="Ссылка на GIF/Картинку", required=False, placeholder="https://i.imgur.com/...")
+    news_gif = discord.ui.TextInput(label="Ссылка на GIF/Картинку", required=False, placeholder="https://media1.tenor.com/...")
     news_color = discord.ui.TextInput(label="HEX Цвет (без #)", default="00BFFF", max_length=6)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -1831,7 +1831,7 @@ async def stream(interaction: discord.Interaction):
         ),
         color=0x9146FF
     )
-    embed.set_image(url="https://i.imgur.com/83UqQjT.gif") 
+    embed.set_image(url="https://media1.tenor.com/m/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif") 
     
     await interaction.channel.send(content="@everyone Ребята, переходите на стрим!", embed=embed)
     await interaction.response.send_message("✅ Анонс стрима отправлен!", ephemeral=True)
@@ -2011,7 +2011,7 @@ async def setup_verify(interaction: discord.Interaction):
         ), 
         color=0x3498DB
     )
-    embed.set_image(url="https://i.imgur.com/83UqQjT.gif")
+    embed.set_image(url="https://media1.tenor.com/m/zLQ4_cEQY0AAAAAC/sao.gif")
     embed.set_footer(text="Aincrad Security System • Ручная проверка Кардинала")
     
     await interaction.channel.send(embed=embed)
@@ -2103,7 +2103,7 @@ async def setup_ranks(interaction: discord.Interaction):
         ),
         color=0xE02653
     )
-    embed.set_image(url="https://i.imgur.com/83UqQjT.gif")
+    embed.set_image(url="https://media1.tenor.com/m/zLQ4_cEQY0AAAAAC/sao.gif")
     embed.set_footer(text="Aincrad Leveling System • Разработано системой Кардинал")
     
     await interaction.channel.send(embed=embed)
