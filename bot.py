@@ -560,7 +560,7 @@ async def on_member_join(member: discord.Member):
         )
         embed.set_thumbnail(url=member.display_avatar.url)
         # Гифка встроена в сам эмбед как большой баннер (бэгги стайл)
-        embed.set_image(url="https://media.tenor.com/6U-LqU4s2oEAAAAC/sword-art-online-kirito.gif")
+        embed.set_image(url="https://media.giphy.com/media/10llnwGGo64Yj6/giphy.gif")
         embed.set_footer(text="Aincrad Cardinal System")
         
         try:
@@ -794,14 +794,14 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
     embed_res = discord.Embed(title="🕵️ РЕЗУЛЬТАТ ОГРАБЛЕНИЯ")
 
     if success:
-        embed_res.set_image(url="https://i.pinimg.com/originals/58/23/81/582381e4e65d4f6a027116695445d649.gif")
+        embed_res.set_image(url="https://media.giphy.com/media/L0qTl8hl84QwG/giphy.gif")
         users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": potential_amount}})
         users_collection.update_one({"_id": member.id}, {"$inc": {"coins": -potential_amount}})
         await add_xp(interaction, attacker.id, 20)
         embed_res.description = f"🎉 Успех! Вы ювелирно вытащили **+{potential_amount:,} Колов** у {member.mention}!"
         embed_res.color = 0x2ECC71
     else:
-        embed_res.set_image(url="https://media.tenor.com/LjXd-V-BrwIAAAAd/kazuma-run-kazuma-scared.gif")
+        embed_res.set_image(url="https://media.giphy.com/media/3o7WTNqU0K9Z1A6sIo/giphy.gif")
         users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": -potential_amount}})
         embed_res.description = f"🚨 Вас заметили! Вы выплатили штраф в размере **-{potential_amount:,} Колов**."
         embed_res.color = 0xE74C3C
@@ -833,7 +833,7 @@ class DuelAcceptView(discord.ui.View):
             return await interaction.followup.send("❌ У одного из участников больше нет нужной суммы на счете!", ephemeral=True)
 
         embed_loading = discord.Embed(title="⚔️ АРЕНА ДУЭЛЕЙ АЙНКРАДА", description=f"Скрещены клинки между {self.challenger.mention} и {self.target.mention}!\nСтавка матча: **{self.amount:,} Колов**.", color=0xE67E22)
-        embed_loading.set_image(url="https://giffiles.alphacoders.com/131/131044.gif")
+        embed_loading.set_image(url="https://media.giphy.com/media/10llnwGGo64Yj6/giphy.gif")
         msg = await interaction.followup.send(embed=embed_loading)
         await asyncio.sleep(3.0)
 
@@ -891,7 +891,7 @@ async def dice(interaction: discord.Interaction, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🎲 ИГРАЛЬНЫЕ КОСТИ", description="Ставки сделаны. Кости выбрасываются на игровой стол...", color=0x9B59B6)
-    embed_loading.set_image(url="https://i.pinimg.com/originals/80/9f/ba/809fba531ccbb8e24010696ffa1503e2.gif")
+    embed_loading.set_image(url="https://media.giphy.com/media/l4hLA4ALdmXqA/giphy.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
@@ -930,7 +930,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🪙 ОРЕЛ И РЕШКА", description="Монета подброшена высоко в воздух...", color=0xF1C40F)
-    embed_loading.set_image(url="https://media.tenor.com/9PALsSO_XpsAAAAC/misaka-mikoto.gif")
+    embed_loading.set_image(url="https://media.giphy.com/media/l41lO4v4d9Q5812eY/giphy.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
@@ -961,7 +961,7 @@ async def roulette(interaction: discord.Interaction, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🎯 РУССКАЯ РУЛЕТКА", description="Барабан револьвера заряжен и начинает вращение...", color=0xE74C3C)
-    embed_loading.set_image(url="https://i.pinimg.com/originals/ac/56/c5/ac56c5c7e6037a698e22c9a30a8dccda.gif")
+    embed_loading.set_image(url="https://media.giphy.com/media/XGmT2oV4V1O38q3Zio/giphy.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
@@ -1073,8 +1073,8 @@ async def shop(interaction: discord.Interaction):
         description="Добро пожаловать в торговый интерфейс системы. Выберите нужную привилегию для покупки с помощью кнопок ниже.", 
         color=0x00BFFF
     )
-    # Заменено на надежную ссылку Tenor
-    embed.set_image(url="https://media.tenor.com/D_i-i_lXw1QAAAAC/sao-agil.gif")
+    # Заменено на стабильную ссылку Giphy
+    embed.set_image(url="https://media.giphy.com/media/11zTEl7fbwmcOQ/giphy.gif")
     embed.add_field(
         name="🛡️ Элитный статус «Неприкасаемый»", 
         value="```fix\nСтоимость: 15,000 Колов\n```\nОбеспечивает абсолютный и бессрочный иммунитет от любых попыток карманных краж и грабежей другими игроками.", 
@@ -1595,8 +1595,8 @@ async def guild_menu(interaction: discord.Interaction):
         description="Используйте кнопки ниже для взаимодействия:", 
         color=0x9B59B6
     )
-    # Заменено на надежную ссылку Tenor
-    embed.set_image(url="https://media.tenor.com/V-E-j1tXb8sAAAAC/sword-art-online-sao.gif")
+    # Заменено на стабильную ссылку Giphy
+    embed.set_image(url="https://media.giphy.com/media/P4TqKx6NHyLnO/giphy.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 # --- АУКЦИОН РОЛЕЙ (ЕДИНОЕ МЕНЮ С ПАГИНАЦИЕЙ И ФИКСАМИ) ---
@@ -1793,7 +1793,7 @@ async def auction(interaction: discord.Interaction):
 class NewsModal(discord.ui.Modal, title="Создание системной новости"):
     news_title = discord.ui.TextInput(label="Заголовок новости", placeholder="СИСТЕМНОЕ ОБНОВЛЕНИЕ", max_length=100)
     news_text = discord.ui.TextInput(label="Основной текст", style=discord.TextStyle.paragraph, placeholder="Добавил пару фишек...\n\n| 🔻 Роли...")
-    news_gif = discord.ui.TextInput(label="Ссылка на GIF/Картинку", required=False, placeholder="https://media.tenor.com/...")
+    news_gif = discord.ui.TextInput(label="Ссылка на GIF/Картинку", required=False, placeholder="https://media.giphy.com/...")
     news_color = discord.ui.TextInput(label="HEX Цвет (без #)", default="00BFFF", max_length=6)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -1832,7 +1832,7 @@ async def stream(interaction: discord.Interaction):
         ),
         color=0x9146FF
     )
-    embed.set_image(url="https://media.tenor.com/PZcK_wQfGgcAAAAC/sao-kirito.gif") 
+    embed.set_image(url="https://media.giphy.com/media/10llnwGGo64Yj6/giphy.gif") 
     
     await interaction.channel.send(content="@everyone Ребята, переходите на стрим!", embed=embed)
     await interaction.response.send_message("✅ Анонс стрима отправлен!", ephemeral=True)
@@ -2012,11 +2012,11 @@ async def setup_verify(interaction: discord.Interaction):
         ), 
         color=0x3498DB
     )
-    embed.set_image(url="https://i.pinimg.com/originals/44/ee/12/44ee12a9754f7a26f8eb7ba48de30c6a.gif")
+    embed.set_image(url="https://media.giphy.com/media/zQhFEBrX6plKg/giphy.gif")
     embed.set_footer(text="Aincrad Security System • Ручная проверка Кардинала")
     
     await interaction.channel.send(embed=embed)
-    await interaction.response.send_message("✅ Инструкция по голосовой верификации успешно установлена.", ephemeral=True)
+    await interaction.response.send_message("✅ Инструкция по голосовой верификации успешно установлено.", ephemeral=True)
 
 @bot.tree.command(name="verify", description="[САППОРТ] Пройти проверку пользователя и выдать гендерную роль")
 @app_commands.choices(gender=[
@@ -2104,7 +2104,7 @@ async def setup_ranks(interaction: discord.Interaction):
         ),
         color=0xE02653
     )
-    embed.set_image(url="https://i.pinimg.com/originals/8e/ec/f2/8eecf2daed72882f84ff0cdd8eaa9333.gif")
+    embed.set_image(url="https://media.giphy.com/media/3o7btQ0MH3RbSoewLu/giphy.gif")
     embed.set_footer(text="Aincrad Leveling System • Разработано системой Кардинал")
     
     await interaction.channel.send(embed=embed)
