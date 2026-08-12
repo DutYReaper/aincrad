@@ -559,11 +559,13 @@ async def on_member_join(member: discord.Member):
             color=0x00BFFF
         )
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.set_image(url="https://media1.tenor.com/m/zLQ4_cEQY0AAAAAC/sao.gif")
         embed.set_footer(text="Aincrad Cardinal System")
         
+        # Гифка отправляется в основе сообщения вместе с пингом (как ты и просил)
+        gif_url = "https://i.pinimg.com/originals/a4/96/8c/a4968ce61d7b0032e5734e0298a00223.gif"
+        
         try:
-            await welcome_channel.send(content=member.mention, embed=embed)
+            await welcome_channel.send(content=f"{member.mention}\n{gif_url}", embed=embed)
         except Exception as e:
             print(f"[ОШИБКА ПРИВЕТСТВИЯ] Не удалось отправить сообщение: {e}")
 
@@ -891,7 +893,7 @@ async def dice(interaction: discord.Interaction, amount: int):
 
     embed_loading = discord.Embed(title="🎲 ИГРАЛЬНЫЕ КОСТИ", description="Ставки сделаны. Кости выбрасываются на игровой стол...", color=0x9B59B6)
     embed_loading.set_image(url="https://i.pinimg.com/originals/80/9f/ba/809fba531ccbb8e24010696ffa1503e2.gif")
-    await interaction.response.send_message(embed_loading)
+    await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
     p_roll, b_roll = random.randint(1, 6), random.randint(1, 6)
@@ -930,7 +932,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
 
     embed_loading = discord.Embed(title="🪙 ОРЕЛ И РЕШКА", description="Монета подброшена высоко в воздух...", color=0xF1C40F)
     embed_loading.set_image(url="https://media.tenor.com/9PALsSO_XpsAAAAC/misaka-mikoto.gif")
-    await interaction.response.send_message(embed_loading)
+    await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
     result = random.choice(["орел", "решка"])
@@ -961,7 +963,7 @@ async def roulette(interaction: discord.Interaction, amount: int):
 
     embed_loading = discord.Embed(title="🎯 РУССКАЯ РУЛЕТКА", description="Барабан револьвера заряжен и начинает вращение...", color=0xE74C3C)
     embed_loading.set_image(url="https://i.pinimg.com/originals/ac/56/c5/ac56c5c7e6037a698e22c9a30a8dccda.gif")
-    await interaction.response.send_message(embed_loading)
+    await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
     shot = random.choice([True, False, False, False, False, False])
@@ -1072,7 +1074,8 @@ async def shop(interaction: discord.Interaction):
         description="Добро пожаловать в торговый интерфейс системы. Выберите нужную привилегию для покупки с помощью кнопок ниже.", 
         color=0x00BFFF
     )
-    embed.set_image(url="https://media1.tenor.com/m/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
+    # Использована надежная ссылка с img/gif хостинга, чтобы отображалась красивым баннером
+    embed.set_image(url="https://i.pinimg.com/originals/1d/18/84/1d18847cc0eec131b09b552277d3f820.gif")
     embed.add_field(
         name="🛡️ Элитный статус «Неприкасаемый»", 
         value="```fix\nСтоимость: 15,000 Колов\n```\nОбеспечивает абсолютный и бессрочный иммунитет от любых попыток карманных краж и грабежей другими игроками.", 
@@ -1593,7 +1596,8 @@ async def guild_menu(interaction: discord.Interaction):
         description="Используйте кнопки ниже для взаимодействия:", 
         color=0x9B59B6
     )
-    embed.set_image(url="https://media1.tenor.com/m/BE70MWMOpkEAAAAC/yuukis-sword-sao.gif")
+    # Использована надежная ссылка с img/gif хостинга
+    embed.set_image(url="https://i.pinimg.com/originals/e0/f8/f0/e0f8f0abdf81e9f193fcc25ed1d368d0.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 
