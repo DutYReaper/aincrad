@@ -41,6 +41,7 @@ bot = commands.Bot(
 MAINTENANCE_MODE = False
 
 # --- НАСТРОЙКИ КАНАЛОВ КОНТЕНТА И АВТОМОДА ---
+WELCOME_CHANNEL_ID = 1529471897647976648
 MEDIA_CHANNELS = [1534785295696789634, 1534785127572443246, 1534550233315414169] # Каналы с мемами/артами
 VIDEO_CHANNEL_ID = 1529472211730043012 # ID канала #ролики
 MEDIA_LOG_CHANNEL_ID = 1534789085582065794 # Канал #проверка-медиа для премодерации
@@ -541,12 +542,30 @@ async def on_voice_state_update(member, before, after):
 
 @bot.event
 async def on_member_join(member: discord.Member):
+    # 1. Выдача стартовой роли
     role = discord.utils.get(member.guild.roles, name="unverify") 
     if role:
         try:
             await member.add_roles(role)
         except Exception:
             pass
+
+    # 2. Красивое приветствие в канал
+    welcome_channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
+    if welcome_channel:
+        embed = discord.Embed(
+            title="⚔️ ДОБРО ПОЖАЛОВАТЬ В АЙНКРАД ⚔️",
+            description=f"Приветствуем тебя, {member.mention}!\nТы стал **{member.guild.member_count}-м** игроком, вошедшим в эту башню.\n\nДля начала игры пройди верификацию в голосовом канале.",
+            color=0x00BFFF
+        )
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_image(url="https://media1.tenor.com/m/zLQ4_cEQY0AAAAAC/sao.gif")
+        embed.set_footer(text="Aincrad Cardinal System")
+        
+        try:
+            await welcome_channel.send(content=member.mention, embed=embed)
+        except Exception as e:
+            print(f"[ОШИБКА ПРИВЕТСТВИЯ] Не удалось отправить сообщение: {e}")
 
 # --- АДМИНСКАЯ КОМАНДА ТЕХОБСЛУЖИВАНИЯ ---
 @bot.tree.command(name="maintenance", description="[АДМИН] Включить/выключить глобальный режим техобслуживания")
@@ -872,7 +891,7 @@ async def dice(interaction: discord.Interaction, amount: int):
 
     embed_loading = discord.Embed(title="🎲 ИГРАЛЬНЫЕ КОСТИ", description="Ставки сделаны. Кости выбрасываются на игровой стол...", color=0x9B59B6)
     embed_loading.set_image(url="https://i.pinimg.com/originals/80/9f/ba/809fba531ccbb8e24010696ffa1503e2.gif")
-    await interaction.response.send_message(embed=embed_loading)
+    await interaction.response.send_message(embed_loading)
     await asyncio.sleep(3.0)
 
     p_roll, b_roll = random.randint(1, 6), random.randint(1, 6)
@@ -911,7 +930,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
 
     embed_loading = discord.Embed(title="🪙 ОРЕЛ И РЕШКА", description="Монета подброшена высоко в воздух...", color=0xF1C40F)
     embed_loading.set_image(url="https://media.tenor.com/9PALsSO_XpsAAAAC/misaka-mikoto.gif")
-    await interaction.response.send_message(embed=embed_loading)
+    await interaction.response.send_message(embed_loading)
     await asyncio.sleep(3.0)
 
     result = random.choice(["орел", "решка"])
@@ -942,7 +961,7 @@ async def roulette(interaction: discord.Interaction, amount: int):
 
     embed_loading = discord.Embed(title="🎯 РУССКАЯ РУЛЕТКА", description="Барабан револьвера заряжен и начинает вращение...", color=0xE74C3C)
     embed_loading.set_image(url="https://i.pinimg.com/originals/ac/56/c5/ac56c5c7e6037a698e22c9a30a8dccda.gif")
-    await interaction.response.send_message(embed=embed_loading)
+    await interaction.response.send_message(embed_loading)
     await asyncio.sleep(3.0)
 
     shot = random.choice([True, False, False, False, False, False])
@@ -1053,6 +1072,7 @@ async def shop(interaction: discord.Interaction):
         description="Добро пожаловать в торговый интерфейс системы. Выберите нужную привилегию для покупки с помощью кнопок ниже.", 
         color=0x00BFFF
     )
+    embed.set_image(url="https://media1.tenor.com/m/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     embed.add_field(
         name="🛡️ Элитный статус «Неприкасаемый»", 
         value="```fix\nСтоимость: 15,000 Колов\n```\nОбеспечивает абсолютный и бессрочный иммунитет от любых попыток карманных краж и грабежей другими игроками.", 
@@ -1573,6 +1593,7 @@ async def guild_menu(interaction: discord.Interaction):
         description="Используйте кнопки ниже для взаимодействия:", 
         color=0x9B59B6
     )
+    embed.set_image(url="https://media1.tenor.com/m/BE70MWMOpkEAAAAC/yuukis-sword-sao.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 
