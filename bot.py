@@ -71,7 +71,9 @@ def get_or_create_user(user_id):
             "streak": 0,
             "guild_id": None,
             "special_title": "Отсутствует",
-            "voice_time": 0.0 
+            "voice_time": 0.0,
+            "partner_id": None, 
+            "marry_time": 0.0
         }
         users_collection.insert_one(new_user)
         return 100, 0, 1, 0.0, 0.0, 0.0, 0.0, 0, None, 'Отсутствует', 0.0
@@ -537,31 +539,28 @@ async def on_voice_state_update(member, before, after):
         except Exception:
             pass
 
+
+# --- МИНИМАЛИСТИЧНОЕ BAGGY ПРИВЕТСТВИЕ КАК У SAPPHIRE ---
 @bot.event
 async def on_member_join(member: discord.Member):
     role = discord.utils.get(member.guild.roles, name="unverify") 
     if role:
         try:
             await member.add_roles(role)
-        except Exception:
+        except: 
             pass
 
     welcome_channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
     if welcome_channel:
-        embed = discord.Embed(
-            title="⚔️ ДОБРО ПОЖАЛОВАТЬ В АЙНКРАД ⚔️",
-            description=f"Приветствуем тебя, {member.mention}!\nТы стал **{member.guild.member_count}-м** игроком, вошедшим в эту башню.\n\nДля начала игры пройди верификацию в голосовом канале.",
-            color=0x00BFFF
-        )
-        embed.set_thumbnail(url=member.display_avatar.url)
-        # ИСПРАВЛЕНО: Прямая ссылка на гифку вместо tenor.com/m/... для корректного отображения в Discord Embed
-        embed.set_image(url="https://media1.tenor.com/images/zLQ4_cEQY0AAAAAC/sao.gif")
-        embed.set_footer(text="Aincrad Cardinal System")
-        
+        content_msg = f"Welcome {member.mention} to **Aincrad**!"
+        embed = discord.Embed(color=0x2B2D31)
+        embed.set_author(name=f"Member #{member.guild.member_count}", icon_url=member.display_avatar.url)
+        embed.set_image(url="https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExZWFmN3l4dDZleDhmdDJ0Y3MxcDlhMzB5cWs4dHgxM29na2Q2ZmQ0diZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/12wr8S2n5fL8lO/giphy.gif")
         try:
-            await welcome_channel.send(content=member.mention, embed=embed)
+            await welcome_channel.send(content=content_msg, embed=embed)
         except Exception as e:
             print(f"[ОШИБКА ПРИВЕТСТВИЯ] Не удалось отправить сообщение: {e}")
+
 
 # --- АДМИНСКАЯ КОМАНДА ТЕХОБСЛУЖИВАНИЯ ---
 @bot.tree.command(name="maintenance", description="[АДМИН] Включить/выключить глобальный режим техобслуживания")
@@ -617,11 +616,132 @@ async def profile(interaction: discord.Interaction, member: discord.Member = Non
     embed.set_footer(text="Aincrad Status Management System")
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="leaderboard", description="Посмотреть глобальный топ игроков Айнкрада")
+
+# --- СИСТЕМА БРАКОВ (MARRY SYSTEM) ---
+
+class MarryAcceptView(discord.ui.View):
+    def __init__(self, proposer: discord.Member, target: discord.Member):
+        super().__init__(timeout=300)
+        self.proposer = proposer
+        self.target = target
+
+    @discord.ui.button(label="Принять", style=discord.ButtonStyle.green, emoji="💍")
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.target.id:
+            return await interaction.response.send_message("❌ Это предложение адресовано не вам!", ephemeral=True)
+
+        p_coins, *_ = get_or_create_user(self.proposer.id)
+        if p_coins < 3000:
+            return await interaction.response.send_message("❌ У инициатора брака больше нет средств на свадьбу (3000 Колов)!", ephemeral=True)
+
+        for child in self.children: child.disabled = True
+        
+        # Выдача роли 💞
+        role = discord.utils.get(interaction.guild.roles, name="💞")
+        if role:
+            try:
+                await self.proposer.add_roles(role)
+                await self.target.add_roles(role)
+            except: pass
+        
+        users_collection.update_one({"_id": self.proposer.id}, {"$inc": {"coins": -3000}})
+        
+        current_time = time.time()
+        users_collection.update_one({"_id": self.proposer.id}, {"$set": {"partner_id": self.target.id, "marry_time": current_time}})
+        users_collection.update_one({"_id": self.target.id}, {"$set": {"partner_id": self.proposer.id, "marry_time": current_time}})
+        
+        embed = discord.Embed(title="💖 УСПЕШНО ПОЖЕНИЛИСЬ!", description=f"{self.target.mention} и {self.proposer.mention} теперь состоят в законном браке!\n*Списано 3,000 Колов за церемонию.*", color=0xFF69B4)
+        embed.set_image(url="https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExcmwwc2U1cDg3ZHUzcjZ6ZG9ieGhlZ2llcGhsNzgzeTE3Y3k0bHFxYyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/nyGFcsP0kAobm/giphy.gif")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Отказать", style=discord.ButtonStyle.red, emoji="💔")
+    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.target.id:
+            return await interaction.response.send_message("❌ Это предложение адресовано не вам!", ephemeral=True)
+
+        for child in self.children: child.disabled = True
+        
+        embed = discord.Embed(title="💔 ОТКАЗ", description=f"{self.target.mention} отверг(ла) предложение от {self.proposer.mention}.", color=0x2B2D31)
+        embed.set_image(url="https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExeXo0aXNtbDVpOHY0NmN5d3NjcnBvdmJrZ2hnYm13dHV3ZnllZ2E3YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/oS56qcrdYDBw4/giphy.gif")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+@bot.tree.command(name="marry", description="Сделать предложение руки и сердца (Стоимость: 3000 Колов)")
+@check_maintenance()
+async def marry(interaction: discord.Interaction, member: discord.Member):
+    if member.id == interaction.user.id:
+        return await interaction.response.send_message("❌ Нельзя жениться на самом себе!", ephemeral=True)
+    if member.bot:
+        return await interaction.response.send_message("❌ Нельзя жениться на боте!", ephemeral=True)
+        
+    p_coins, *_ = get_or_create_user(interaction.user.id)
+    if p_coins < 3000:
+        return await interaction.response.send_message("❌ У вас недостаточно средств! Свадьба стоит 3,000 Колов.", ephemeral=True)
+
+    u1 = users_collection.find_one({"_id": interaction.user.id})
+    u2 = users_collection.find_one({"_id": member.id})
+    
+    if u1 and u1.get("partner_id"):
+        return await interaction.response.send_message("❌ Вы уже состоите в браке!", ephemeral=True)
+    if u2 and u2.get("partner_id"):
+        return await interaction.response.send_message("❌ Этот игрок уже состоит в браке!", ephemeral=True)
+        
+    embed = discord.Embed(title="💍 ПРЕДЛОЖЕНИЕ", description=f"{member.mention}, игрок {interaction.user.mention} предлагает вам вступить в брак!\nВы согласны?", color=0x2B2D31)
+    await interaction.response.send_message(content=member.mention, embed=embed, view=MarryAcceptView(interaction.user, member))
+
+@bot.tree.command(name="divorce", description="Расторгнуть брак (Пошлина: 1000 Колов)")
+@check_maintenance()
+async def divorce(interaction: discord.Interaction):
+    u1 = users_collection.find_one({"_id": interaction.user.id})
+    if not u1 or not u1.get("partner_id"):
+        return await interaction.response.send_message("❌ Вы не состоите в браке!", ephemeral=True)
+        
+    coins, *_ = get_or_create_user(interaction.user.id)
+    if coins < 1000:
+        return await interaction.response.send_message("❌ У вас недостаточно средств! Развод стоит 1,000 Колов.", ephemeral=True)
+        
+    partner_id = u1["partner_id"]
+    
+    users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -1000}, "$set": {"partner_id": None, "marry_time": 0.0}})
+    users_collection.update_one({"_id": partner_id}, {"$set": {"partner_id": None, "marry_time": 0.0}})
+    
+    role = discord.utils.get(interaction.guild.roles, name="💞")
+    if role:
+        try:
+            await interaction.user.remove_roles(role)
+            partner_member = interaction.guild.get_member(partner_id)
+            if partner_member:
+                await partner_member.remove_roles(role)
+        except: pass
+        
+    embed = discord.Embed(title="💔 РАЗВОД", description=f"Вы успешно расторгли брак с <@{partner_id}>.\n*Списано 1,000 Колов за пошлину.*", color=0x2B2D31)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="love_profile", description="Посмотреть красивый Baggy-профиль вашей пары")
+@check_maintenance()
+async def love_profile(interaction: discord.Interaction, member: discord.Member = None):
+    target = member or interaction.user
+    user_data = users_collection.find_one({"_id": target.id})
+    if not user_data or not user_data.get("partner_id"):
+        return await interaction.response.send_message("❌ Игрок не состоит в браке.", ephemeral=True)
+        
+    partner_id = user_data["partner_id"]
+    marry_time = user_data.get("marry_time", time.time())
+    days_together = int((time.time() - marry_time) // 86400)
+    
+    embed = discord.Embed(color=0x2B2D31)
+    embed.set_author(name=f"Любовный профиль | {target.display_name}", icon_url=target.display_avatar.url)
+    embed.description = f"💞 **Партнеры:** <@{target.id}> и <@{partner_id}>\n" \
+                        f"⏳ **Вместе:** `{days_together} дн.`\n"
+    embed.set_image(url="https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExcmwwc2U1cDg3ZHUzcjZ6ZG9ieGhlZ2llcGhsNzgzeTE3Y3k0bHFxYyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/nyGFcsP0kAobm/giphy.gif")
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="leaderboard", description="Посмотреть глобальный топ игроков и гильдий Айнкрада")
 @app_commands.choices(category=[
     app_commands.Choice(name="Топ по Этажам (Уровню)", value="level"),
     app_commands.Choice(name="Топ по Капиталу (Колы)", value="coins"),
-    app_commands.Choice(name="Топ по Войс-Активности", value="voice")
+    app_commands.Choice(name="Топ по Войс-Активности", value="voice"),
+    app_commands.Choice(name="Топ Гильдий (Казна)", value="guilds")
 ])
 @check_maintenance()
 async def leaderboard(interaction: discord.Interaction, category: str = "level"):
@@ -633,16 +753,20 @@ async def leaderboard(interaction: discord.Interaction, category: str = "level")
         top = list(users_collection.find().sort("coins", -1).limit(10))
         title = "💰 ТОП-10: БОГАТЕЙШИЕ ИГРОКИ"
         desc = "\n".join([f"`#{i}` <@{u['_id']}> — **{u.get('coins', 0):,} Колов**" for i, u in enumerate(top, 1)])
+    elif category == "guilds":
+        top = list(guilds_collection.find().sort("bank", -1).limit(10))
+        title = "🏰 ТОП-10 ГИЛЬДИЙ АЙНКРАДА"
+        desc = "\n".join([f"`#{i}` **{g['guild_name']}** — **{g.get('bank', 0):,} Колов**" for i, g in enumerate(top, 1)])
     else:
         top = list(users_collection.find().sort("voice_time", -1).limit(10))
         title = "🎙️ ТОП-10: ВОЙС-АКТИВНОСТЬ"
         desc = "\n".join([f"`#{i}` <@{u['_id']}> — **{int(u.get('voice_time', 0)//3600)} ч. {int((u.get('voice_time', 0)%3600)//60)} м.**" for i, u in enumerate(top, 1)])
 
-    embed = discord.Embed(title=title, description=desc if top else "Таблица пуста.", color=0x00BFFF)
+    embed = discord.Embed(title=title, description=desc if top else "Таблица пуста.", color=0x00BFFF if category != "guilds" else 0x2B2D31)
     embed.set_footer(text="Aincrad Global Leaderboard")
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="pay", description="Совершить межбанковский перевод Колов другому игроку")
+@bot.tree.command(name="pay", description="Совершить межбанковский перевод Колов (Комиссия 10%)")
 @check_maintenance()
 async def pay(interaction: discord.Interaction, member: discord.Member, amount: int):
     if amount <= 0 or member.id == interaction.user.id:
@@ -653,11 +777,14 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
         return await interaction.response.send_message("❌ Ошибка перевода: на вашем счете недостаточно средств!", ephemeral=True)
 
     get_or_create_user(member.id)
+    fee = int(amount * 0.10)
+    receive = amount - fee
+    
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
-    users_collection.update_one({"_id": member.id}, {"$inc": {"coins": amount}})
+    users_collection.update_one({"_id": member.id}, {"$inc": {"coins": receive}})
 
-    embed = discord.Embed(title="💸 МЕЖБАНКОВСКИЙ ПЕРЕВОД УСПЕШЕН", color=0x00BFFF)
-    embed.description = f"Со счета успешно списано и переведено **{amount:,} Колов** в пользу игрока {member.mention}."
+    embed = discord.Embed(title="💸 МЕЖБАНКОВСКИЙ ПЕРЕВОД УСПЕШЕН", color=0x2B2D31)
+    embed.description = f"Списано со счета: **{amount:,} Колов**.\nУспешно зачислено ({member.mention}): **{receive:,} Колов**\n*(Банковская комиссия 10%: {fee:,})*"
     embed.set_footer(text="Безопасная транзакция Aincrad Network")
     await interaction.response.send_message(embed=embed)
 
@@ -789,7 +916,6 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
     embed_res = discord.Embed(title="🕵️ РЕЗУЛЬТАТ ОГРАБЛЕНИЯ")
 
     if success:
-        # ИСПРАВЛЕНО: Прямая ссылка на гифку
         embed_res.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
         users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": potential_amount}})
         users_collection.update_one({"_id": member.id}, {"$inc": {"coins": -potential_amount}})
@@ -797,7 +923,6 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
         embed_res.description = f"🎉 Успех! Вы ювелирно вытащили **+{potential_amount:,} Колов** у {member.mention}!"
         embed_res.color = 0x2ECC71
     else:
-        # ИСПРАВЛЕНО: Прямая ссылка на гифку
         embed_res.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
         users_collection.update_one({"_id": attacker.id}, {"$inc": {"coins": -potential_amount}})
         embed_res.description = f"🚨 Вас заметили! Вы выплатили штраф в размере **-{potential_amount:,} Колов**."
@@ -830,7 +955,6 @@ class DuelAcceptView(discord.ui.View):
             return await interaction.followup.send("❌ У одного из участников больше нет нужной суммы на счете!", ephemeral=True)
 
         embed_loading = discord.Embed(title="⚔️ АРЕНА ДУЭЛЕЙ АЙНКРАДА", description=f"Скрещены клинки между {self.challenger.mention} и {self.target.mention}!\nСтавка матча: **{self.amount:,} Колов**.", color=0xE67E22)
-        # ИСПРАВЛЕНО: Прямая ссылка на гифку
         embed_loading.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
         msg = await interaction.followup.send(embed=embed_loading)
         await asyncio.sleep(3.0)
@@ -889,7 +1013,6 @@ async def dice(interaction: discord.Interaction, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🎲 ИГРАЛЬНЫЕ КОСТИ", description="Ставки сделаны. Кости выбрасываются на игровой стол...", color=0x9B59B6)
-    # ИСПРАВЛЕНО: Прямая ссылка на гифку
     embed_loading.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
@@ -929,7 +1052,6 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🪙 ОРЕЛ И РЕШКА", description="Монета подброшена высоко в воздух...", color=0xF1C40F)
-    # ИСПРАВЛЕНО: Прямая ссылка на гифку
     embed_loading.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
@@ -961,7 +1083,6 @@ async def roulette(interaction: discord.Interaction, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🎯 РУССКАЯ РУЛЕТКА", description="Барабан револьвера заряжен и начинает вращение...", color=0xE74C3C)
-    # ИСПРАВЛЕНО: Прямая ссылка на гифку
     embed_loading.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
@@ -1072,10 +1193,10 @@ async def shop(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🛒 ЦЕНТРАЛЬНЫЙ ИГРОВОЙ МАГАЗИН АЙНКРАДА", 
         description="Добро пожаловать в торговый интерфейс системы. Выберите нужную привилегию для покупки с помощью кнопок ниже.", 
-        color=0x00BFFF
+        color=0x2B2D31
     )
-    # ИСПРАВЛЕНО: Прямая ссылка на гифку для /shop
-    embed.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
+    # Гифка из короткой версии
+    embed.set_image(url="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExMmZrb210em05Ync0M2p6bnE2anJwZGM2NDk2MG9ieDluN3JzbTk2ZCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/DU3DhzJli9dsc/giphy.gif")
     embed.add_field(
         name="🛡️ Элитный статус «Неприкасаемый»", 
         value="```fix\nСтоимость: 15,000 Колов\n```\nОбеспечивает абсолютный и бессрочный иммунитет от любых попыток карманных краж и грабежей другими игроками.", 
@@ -1594,10 +1715,10 @@ async def guild_menu(interaction: discord.Interaction):
     embed = discord.Embed(
         title="────── ┌ 🏰 ГИЛЬДИИ АЙНКРАДА ┐ ──────", 
         description="Используйте кнопки ниже для взаимодействия:", 
-        color=0x9B59B6
+        color=0x2B2D31
     )
-    # ИСПРАВЛЕНО: Прямая ссылка на гифку для /guild
-    embed.set_image(url="https://media1.tenor.com/images/BE70MWMOpkEAAAAC/yuukis-sword-sao.gif")
+    # Гифка из короткой версии
+    embed.set_image(url="https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExcDdwNWNmdnRyOGJlNW1kYmYzNm12N3Vyc3diaGlzZm92ajZnZ2F1YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XG444KXEaA3zW/giphy.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 # --- АУКЦИОН РОЛЕЙ (ЕДИНОЕ МЕНЮ С ПАГИНАЦИЕЙ И ФИКСАМИ) ---
@@ -1833,7 +1954,6 @@ async def stream(interaction: discord.Interaction):
         ),
         color=0x9146FF
     )
-    # ИСПРАВЛЕНО: Прямая ссылка на гифку
     embed.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif") 
     
     await interaction.channel.send(content="@everyone Ребята, переходите на стрим!", embed=embed)
@@ -2014,7 +2134,6 @@ async def setup_verify(interaction: discord.Interaction):
         ), 
         color=0x3498DB
     )
-    # ИСПРАВЛЕНО: Прямая ссылка на гифку
     embed.set_image(url="https://media1.tenor.com/images/zLQ4_cEQY0AAAAAC/sao.gif")
     embed.set_footer(text="Aincrad Security System • Ручная проверка Кардинала")
     
@@ -2063,7 +2182,7 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
             created_at = discord.utils.format_dt(member.created_at, style='F')
             docs_embed.add_field(name="Аккаунт создан", value=created_at, inline=False)
             
-            sensor_link = `https://discord-sensor.com/members/{member.id}`
+            sensor_link = f"https://discord-sensor.com/members/{member.id}"
             docs_embed.add_field(name="Discord Sensor", value=f"🔗 [Открыть профиль]({sensor_link})", inline=False)
             
             await docs_channel.send(embed=docs_embed)
@@ -2107,7 +2226,6 @@ async def setup_ranks(interaction: discord.Interaction):
         ),
         color=0xE02653
     )
-    # ИСПРАВЛЕНО: Прямая ссылка на гифку
     embed.set_image(url="https://media1.tenor.com/images/zLQ4_cEQY0AAAAAC/sao.gif")
     embed.set_footer(text="Aincrad Leveling System • Разработано системой Кардинал")
     
