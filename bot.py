@@ -2234,3 +2234,4 @@ async def setup_ranks(interaction: discord.Interaction):
 
 keep_alive()
 bot.run(os.getenv("TOKEN"))
+
