@@ -726,19 +726,18 @@ async def editrole(interaction: discord.Interaction):
 
 @bot.tree.command(name="deleterole", description="Удалить роль (5000)")
 @check_maintenance()
-async def deleterole(interaction: discord.Interaction):
-    if get_user(interaction.user.id)['coins'] < 5000: return await interaction.response.send_message("❌ Нет средств!", ephemeral=True)
-    roles = [interaction.guild.get_role(r["role_id"]) for r in list(custom_roles_coll.find({"user_id": interaction.user.id})) if interaction.guild.get_role(r["role_id"])]
-    if not roles: return await interaction.response.send_message("❌ Нет ролей!", ephemeral=True)
-    async def cb(i):
+async def cb(i):
         rid = int(i.data['values'][0])
         r = i.guild.get_role(rid)
         update_coins(i.user.id, -5000)
-        custom_roles_coll.delete_one({"role_id": rid}); auction_coll.delete_one({"role_id": rid})
-        if r: try: await r.delete()
-        except: pass
+        custom_roles_coll.delete_one({"role_id": rid})
+        auction_coll.delete_one({"role_id": rid})
+        if r: 
+            try: 
+                await r.delete()
+            except: 
+                pass
         await i.response.send_message("🗑️ Роль удалена!", ephemeral=True)
-    await interaction.response.send_message(embed=discord.Embed(title="🗑️ УДАЛЕНИЕ", color=0xE74C3C), view=SelectRoleView(roles, cb), ephemeral=True)
 
 @bot.tree.command(name="settitle", description="Выбрать титул")
 @check_maintenance()
