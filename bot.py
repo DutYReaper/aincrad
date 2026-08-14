@@ -206,7 +206,7 @@ async def on_ready():
     await bot.tree.sync()
     print(f"Бот {bot.user} запущен и полностью готов к работе в Айнкраде!")
 
-# --- КНОПКИ ПРЕМОДЕРАЦИИ МЕДИА И РОЛИКОВ ---
+# --- КНОПКИ ПРЕМОДЕРАЦИИ МЕДИИ И РОЛИКОВ ---
 class MediaModerationView(discord.ui.View):
     def __init__(self, author_id: int, channel_id: int, content_text: str, files_data: list):
         super().__init__(timeout=None)
@@ -230,7 +230,6 @@ class MediaModerationView(discord.ui.View):
             if not webhook:
                 webhook = await target_channel.create_webhook(name="Yui Media")
 
-            # Восстанавливаем файлы из сохраненных байтов без потери ссылок
             prepared_files = [discord.File(io.BytesIO(f["bytes"]), filename=f["filename"]) for f in self.files_data]
 
             post_content = f"**Отправил:** <@{self.author_id}>"
@@ -636,7 +635,6 @@ class MarryAcceptView(discord.ui.View):
 
         for child in self.children: child.disabled = True
         
-        # Выдача роли 💞
         role = discord.utils.get(interaction.guild.roles, name="💞")
         if role:
             try:
@@ -930,7 +928,7 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
 
     await interaction.edit_original_response(embed=embed_res)
 
-# --- АЗАРТНЫЕ ИГРЫ И ДУЭЛЬ ---
+# --- АЗАРТНЫЕ ИГРЫ И ДУЭЛЬ (С ВЕРНУТЫМИ АНИМЕ-ГИФКАМИ) ---
 
 class DuelAcceptView(discord.ui.View):
     def __init__(self, challenger: discord.Member, target: discord.Member, amount: int):
@@ -1013,7 +1011,8 @@ async def dice(interaction: discord.Interaction, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🎲 ИГРАЛЬНЫЕ КОСТИ", description="Ставки сделаны. Кости выбрасываются на игровой стол...", color=0x9B59B6)
-    embed_loading.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
+    # Гифка: красный кубик
+    embed_loading.set_image(url="https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExcWwwZ2t4aXR5c3YxM2Yzb2kxaWJ2d3c5NzJqbnUzajV0cW93Z2M2dCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l4hLA4ALdmXqSRBKQ/giphy.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
@@ -1052,7 +1051,8 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🪙 ОРЕЛ И РЕШКА", description="Монета подброшена высоко в воздух...", color=0xF1C40F)
-    embed_loading.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
+    # Гифка: анимешная девочка с монеткой
+    embed_loading.set_image(url="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExYXQwNWtzbW52bjJ6aW4yemhwMHAxYmZ6MzExZzd0MGgzZTNjMTNnbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1n7cDjGhaHsmT5AUI3/giphy.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
@@ -1083,7 +1083,8 @@ async def roulette(interaction: discord.Interaction, amount: int):
     users_collection.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -amount}})
 
     embed_loading = discord.Embed(title="🎯 РУССКАЯ РУЛЕТКА", description="Барабан револьвера заряжен и начинает вращение...", color=0xE74C3C)
-    embed_loading.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
+    # Гифка: рулетка / оружие
+    embed_loading.set_image(url="https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExdWQwMjM0MGVwcGZkYTN2aHF2aTN2MjZ2MzhzMjMwbzE3bzgzMGZ6ZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7TKSHA3wTep5L848/giphy.gif")
     await interaction.response.send_message(embed=embed_loading)
     await asyncio.sleep(3.0)
 
@@ -1195,7 +1196,6 @@ async def shop(interaction: discord.Interaction):
         description="Добро пожаловать в торговый интерфейс системы. Выберите нужную привилегию для покупки с помощью кнопок ниже.", 
         color=0x2B2D31
     )
-    # Гифка из короткой версии
     embed.set_image(url="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExMmZrb210em05Ync0M2p6bnE2anJwZGM2NDk2MG9ieDluN3JzbTk2ZCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/DU3DhzJli9dsc/giphy.gif")
     embed.add_field(
         name="🛡️ Элитный статус «Неприкасаемый»", 
@@ -1717,11 +1717,10 @@ async def guild_menu(interaction: discord.Interaction):
         description="Используйте кнопки ниже для взаимодействия:", 
         color=0x2B2D31
     )
-    # Гифка из короткой версии
     embed.set_image(url="https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExcDdwNWNmdnRyOGJlNW1kYmYzNm12N3Vyc3diaGlzZm92ajZnZ2F1YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XG444KXEaA3zW/giphy.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
-# --- АУКЦИОН РОЛЕЙ (ЕДИНОЕ МЕНЮ С ПАГИНАЦИЕЙ И ФИКСАМИ) ---
+# --- АУКЦИОН РОЛЕЙ ---
 
 class SellRoleModal(discord.ui.Modal, title="Выставить роль на аукцион"):
     price_input = discord.ui.TextInput(label="Цена в Колах", placeholder="5000", max_length=10)
@@ -2234,4 +2233,3 @@ async def setup_ranks(interaction: discord.Interaction):
 
 keep_alive()
 bot.run(os.getenv("TOKEN"))
-
