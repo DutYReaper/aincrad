@@ -696,7 +696,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
     if not await check_gambling(interaction, amount): return
     
     embed = discord.Embed(title="🪙 ОРЕЛ И РЕШКА", description="Бросаем...", color=0xF1C40F)
-    embed.set_image(url="https://media1.tenor.com/m/9PALsSO_XpsAAAAd/misaka-mikoto.gif")
+    embed.set_image(url="https://i.pinimg.com/originals/5d/3b/f5/5d3bf5ea6706bd4dc96cec12418765ea.gif")
     await interaction.response.send_message(embed=embed)
     await asyncio.sleep(3.0)
 
