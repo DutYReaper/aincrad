@@ -1,15 +1,15 @@
-from flask import Flask
+from flask import Flask, Response
 from threading import Thread
+import os
 
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "I'm alive!"
+    # Возвращаем простой текст без лишних HTML-тегов
+    return Response("I'm alive!", mimetype='text/plain')
 
 def run():
-    # Render автоматически задает порт, либо используем 8080
-    import os
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
