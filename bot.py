@@ -11,6 +11,15 @@ from discord.ext import commands
 from keep_alive import keep_alive
 
 # ==========================================
+# 0. ФОРМАТИРОВАНИЕ ТЕКСТА (ЦВЕТА)
+# ==========================================
+def text_blue(text):
+    return f"```ansi\n\u001b[36m{text}\u001b[0m\n```"
+
+def text_red(text):
+    return f"```diff\n- {text}\n```"
+
+# ==========================================
 # 1. НАСТРОЙКИ И БАЗА ДАННЫХ
 # ==========================================
 MONGO_URI = os.getenv('MONGO_URI')
@@ -160,10 +169,10 @@ async def on_voice_state_update(member, before, after):
             users_coll.update_one({"_id": user_id}, {"$inc": {"coins": minutes, "voice_time": int(total_time)}}, upsert=True)
             await add_xp(member, user_id, minutes)
             try:
-                embed = discord.Embed(description="```ansi\n\u001b[36m─────────────── ┌ 🎙️ ВОЙС-АКТИВНОСТЬ ┐ ───────────────\u001b[0m\n```\nСеанс связи завершен!", color=0x00BFFF)
-                embed.add_field(name="🪙 Колы", value=f"```fix\n+{minutes:,}\n```", inline=True)
-                embed.add_field(name="⚡ Опыт", value=f"```yaml\n+{minutes:,} XP\n```", inline=True)
-                embed.add_field(name="⏱️ Время", value=f"```yaml\n{minutes} мин.\n```", inline=True)
+                embed = discord.Embed(title="─────────────── ┌ 🎙️ ВОЙС-АКТИВНОСТЬ ┐ ───────────────", description="Ваш сеанс связи был успешно завершен. Данные сохранены.", color=0x00BFFF)
+                embed.add_field(name="🪙 Колы", value=text_blue(f"+{minutes:,}"), inline=True)
+                embed.add_field(name="⚡ Опыт", value=text_blue(f"+{minutes:,} XP"), inline=True)
+                embed.add_field(name="⏱️ Время", value=text_blue(f"{minutes} мин."), inline=True)
                 embed.set_footer(text="Cardinal Anti-AFK System • Айнкрад")
                 await member.send(embed=embed)
             except Exception: pass
@@ -256,9 +265,9 @@ async def on_message(message):
         elif attachments_count >= 3 and message.channel.id not in MEDIA_CHANNELS: violation_reason = "Массовый спам картинками"
         elif is_fast_flood: violation_reason = "Слишком быстрый флуд"
         elif is_caps_spam: violation_reason = "Caps Lock Spam"
-        elif message.channel.id in MEDIA_CHANNELS and attachments_count == 0 and not is_media: violation_reason = "Только медиаконтент!"
-        elif message.channel.id == VIDEO_CHANNEL_ID and not has_stream and attachments_count == 0 and not is_media: violation_reason = "Только видеоролики!"
-        elif message.channel.id == STREAM_CHANNEL_ID and not has_stream: violation_reason = "Только стримы!"
+        elif message.channel.id in MEDIA_CHANNELS and attachments_count == 0 and not is_media: violation_reason = "В канал можно публиковать только медиафайлы или ссылки на ролики!"
+        elif message.channel.id == VIDEO_CHANNEL_ID and not has_stream and attachments_count == 0 and not is_media: violation_reason = "В канал можно публиковать только видеоролики!"
+        elif message.channel.id == STREAM_CHANNEL_ID and not has_stream: violation_reason = "В канал можно публиковать только стримы!"
 
         if violation_reason:
             try: await message.delete()
@@ -269,9 +278,13 @@ async def on_message(message):
                 log_channel = message.guild.get_channel(AUTO_MOD_LOG_CHANNEL_ID)
                 if log_channel:
                     embed = discord.Embed(title="⚠️ КАРДИНАЛ: НОВЫЙ ОТЧЕТ АВТОМОДА", color=0xE74C3C)
-                    embed.add_field(name="Пользователь", value=message.author.mention)
-                    embed.add_field(name="Канал", value=message.channel.mention)
-                    embed.add_field(name="Причина", value=violation_reason, inline=False)
+                    embed.add_field(name="👤 Пользователь", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
+                    embed.add_field(name="📅 Аккаунт создан", value=f"<t:{int(message.author.created_at.timestamp())}:R>", inline=True)
+                    embed.add_field(name="📁 Канал", value=message.channel.mention, inline=True)
+                    embed.add_field(name="⚡ Причина", value=text_blue(violation_reason), inline=False)
+                    if message.content:
+                        embed.add_field(name="💬 Нарушение", value=text_blue(message.content[:1000]), inline=False)
+                    embed.set_footer(text="Aincrad Security Shield • Сообщение удалено")
                     try: await log_channel.send(embed=embed)
                     except Exception: pass
             return
@@ -282,7 +295,7 @@ async def on_message(message):
                 mod_channel = bot.get_channel(MEDIA_LOG_CHANNEL_ID)
                 files_data = [{"bytes": await attachment.read(), "filename": attachment.filename} for attachment in message.attachments]
                 embed = discord.Embed(title="🔍 ПРЕМОДЕРАЦИЯ КОНТЕНТА", description=f"**Автор:** {message.author.mention}\n**Канал:** {message.channel.mention}", color=0xF1C40F)
-                if message.content: embed.add_field(name="Текст", value=message.content, inline=False)
+                if message.content: embed.add_field(name="Текст", value=text_blue(message.content), inline=False)
                 if message.attachments: embed.set_image(url=message.attachments[0].url)
                 elif message.embeds and message.embeds[0].image: embed.set_image(url=message.embeds[0].image.url)
                 
@@ -306,7 +319,8 @@ async def balance(interaction: discord.Interaction, member: discord.Member = Non
     embed = discord.Embed(title="🌐 БАНКОВСКИЙ СЧЕТ АЙНКРАДА", color=0x00BFFF)
     embed.set_thumbnail(url=target.display_avatar.url)
     embed.add_field(name="💳 Владелец", value=f"{target.mention}", inline=False)
-    embed.add_field(name="💰 Баланс", value=f"```fix\n{user_data['coins']:,} Колов\n```", inline=False)
+    embed.add_field(name="💰 Баланс", value=text_blue(f"{user_data['coins']:,} Колов"), inline=False)
+    embed.set_footer(text="Aincrad Economy System")
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="profile", description="Посмотреть подробный игровой профиль")
@@ -324,13 +338,18 @@ async def profile(interaction: discord.Interaction, member: discord.Member = Non
 
     embed = discord.Embed(title=f"🛡️ ИГРОВОЙ ПРОФИЛЬ: {target.display_name}", color=0x00BFFF)
     embed.set_thumbnail(url=target.display_avatar.url)
-    embed.add_field(name="⚔️ Этаж башни", value=f"```yaml\n{user_data['level']}\n```", inline=True)
-    embed.add_field(name="🪙 Капитал", value=f"```fix\n{user_data['coins']:,} Колов\n```", inline=True)
-    embed.add_field(name="🔥 Стрик", value=f"```yaml\n{user_data['streak']} дн.\n```", inline=True)
-    embed.add_field(name="🎙️ Часы в Voice", value=f"```yaml\n{voice_hours} ч. {voice_minutes} м.\n```", inline=True)
-    embed.add_field(name="🏰 Гильдия", value=f"```yaml\n{user_data['guild_id'] or 'Нет'}\n```", inline=True)
-    embed.add_field(name="✨ Активный титул", value=f"```fix\n{user_data['special_title']}\n```", inline=False)
+    
+    embed.add_field(name="⚔️ Этаж башни", value=text_blue(user_data['level']), inline=True)
+    embed.add_field(name="🪙 Капитал", value=text_blue(f"{user_data['coins']:,} Колов"), inline=True)
+    embed.add_field(name="🔥 Стрик входов", value=text_blue(f"{user_data['streak']} дн."), inline=True)
+    
+    embed.add_field(name="🎙️ Часы в Voice", value=text_blue(f"{voice_hours} ч. {voice_minutes} м."), inline=True)
+    embed.add_field(name="🏰 Гильдия", value=text_blue(user_data['guild_id'] or 'Нет'), inline=True)
+    
+    embed.add_field(name="✨ Активный титул", value=text_blue(user_data['special_title']), inline=False)
     embed.add_field(name="📊 Прогресс опыта (XP)", value=f"{user_data['xp']} / {next_level_xp} XP\n{bar}", inline=False)
+    
+    embed.set_footer(text="Aincrad Status Management System")
     await interaction.response.send_message(embed=embed)
 
 class MarryAcceptView(discord.ui.View):
@@ -425,7 +444,8 @@ async def love_profile(interaction: discord.Interaction, member: discord.Member 
     days = int((time.time() - user_data.get("marry_time", time.time())) // 86400)
     
     embed = discord.Embed(color=0x2B2D31).set_author(name=f"Любовный профиль | {target.display_name}", icon_url=target.display_avatar.url)
-    embed.description = f"💞 **Партнеры:** <@{target.id}> и <@{user_data['partner_id']}>\n⏳ **Вместе:** `{days} дн.`"
+    embed.add_field(name="💞 Партнеры", value=f"<@{target.id}> и <@{user_data['partner_id']}>", inline=False)
+    embed.add_field(name="⏳ Вместе", value=text_blue(f"{days} дн."), inline=False)
     embed.set_image(url="https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExcmwwc2U1cDg3ZHUzcjZ6ZG9ieGhlZ2llcGhsNzgzeTE3Y3k0bHFxYyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/nyGFcsP0kAobm/giphy.gif")
     await interaction.response.send_message(embed=embed)
 
@@ -471,7 +491,10 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
     update_coins(interaction.user.id, -amount)
     update_coins(member.id, amount - fee)
 
-    embed = discord.Embed(title="💸 ПЕРЕВОД УСПЕШЕН", description=f"Списано: **{amount:,}**\nЗачислено ({member.mention}): **{amount - fee:,}**\n*(Комиссия: {fee:,})*", color=0x2B2D31)
+    embed = discord.Embed(title="💸 ПЕРЕВОД УСПЕШЕН", description=f"Транзакция для {member.mention} проведена.", color=0x2B2D31)
+    embed.add_field(name="Списано", value=text_blue(f"{amount:,}"), inline=True)
+    embed.add_field(name="Зачислено", value=text_blue(f"{amount - fee:,}"), inline=True)
+    embed.add_field(name="Комиссия", value=text_red(f"{fee:,}"), inline=True)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="daily", description="Ежедневная награда")
@@ -493,10 +516,11 @@ async def daily(interaction: discord.Interaction):
     users_coll.update_one({"_id": user_data['_id']}, {"$inc": {"coins": reward_coins}, "$set": {"streak": streak, "last_daily": current_time}})
     await add_xp(interaction, user_data['_id'], reward_xp)
 
-    embed = discord.Embed(title="🎁 ЕЖЕДНЕВНАЯ НАГРАДА", color=0x00FF00)
-    embed.add_field(name="Стрик", value=f"```yaml\n{streak} дн.\n```")
-    embed.add_field(name="Колы", value=f"```fix\n+{reward_coins}\n```")
-    embed.add_field(name="Опыт", value=f"```yaml\n+{reward_xp} XP\n```")
+    embed = discord.Embed(title="─────────────── ┌ 🎁 ЕЖЕДНЕВНАЯ НАГРАДА ┐ ───────────────", description="Ваш ежедневный бонус успешно зачислен на баланс.", color=0x00FF00)
+    embed.add_field(name="🔥 Стрик", value=text_blue(f"{streak} дн."), inline=True)
+    embed.add_field(name="🪙 Колы", value=text_blue(f"+{reward_coins}"), inline=True)
+    embed.add_field(name="⚡ Опыт", value=text_blue(f"+{reward_xp} XP"), inline=True)
+    embed.set_footer(text="Aincrad Economy System")
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="work", description="Работа в Айнкраде")
@@ -513,8 +537,9 @@ async def work(interaction: discord.Interaction):
     users_coll.update_one({"_id": user_data['_id']}, {"$inc": {"coins": earned}, "$set": {"last_work": current_time}})
     await add_xp(interaction, user_data['_id'], random.randint(10, 20))
 
-    embed = discord.Embed(title="🛠️ ОТЧЕТ РАБОТЫ", color=0x3498DB)
-    embed.add_field(name="Награда", value=f"```fix\n+{earned} Колов\n```")
+    embed = discord.Embed(title="─────────────── ┌ 🛠️ ОТЧЕТ РАБОТЫ ┐ ───────────────", description="Вы успешно выполнили поручение и получили оплату.", color=0x3498DB)
+    embed.add_field(name="💰 Награда", value=text_blue(f"+{earned} Колов"), inline=False)
+    embed.set_footer(text="Aincrad Economy System")
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="crime", description="Рискованная авантюра")
@@ -532,16 +557,17 @@ async def crime(interaction: discord.Interaction):
         reward = random.randint(50, 130) + (user_data['level'] * 2)
         users_coll.update_one({"_id": user_data['_id']}, {"$inc": {"coins": reward}, "$set": {"last_crime": current_time}})
         await add_xp(interaction, user_data['_id'], 15)
-        embed.title = "🥷 УСПЕХ"
+        embed.title = "─────────────── ┌ 🥷 УСПЕШНАЯ АВАНТЮРА ┐ ───────────────"
         embed.color = 0x2ECC71
-        embed.description = f"Получено: +{reward} Колов"
+        embed.add_field(name="💰 Получено", value=text_blue(f"+{reward} Колов"), inline=False)
     else:
         fine = random.randint(30, 70)
         users_coll.update_one({"_id": user_data['_id']}, {"$set": {"coins": max(0, user_data['coins'] - fine), "last_crime": current_time}})
-        embed.title = "❌ ПОЙМАН"
+        embed.title = "─────────────── ┌ ❌ ПОЛИЦИЯ АЙНКРАДА ┐ ───────────────"
         embed.color = 0xE74C3C
-        embed.description = f"Штраф: -{fine} Колов"
+        embed.add_field(name="🚨 Штраф", value=text_red(f"{fine} Колов"), inline=False)
         
+    embed.set_footer(text="Aincrad Economy System")
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="rob", description="Карманная кража")
@@ -576,21 +602,22 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
     await interaction.response.send_message(embed=discord.Embed(title="🕵️ ОГРАБЛЕНИЕ", description="Вы подкрадываетесь...", color=0x2C3E50))
     await asyncio.sleep(3.0)
 
-    result_embed = discord.Embed(title="🕵️ РЕЗУЛЬТАТ")
+    result_embed = discord.Embed(title="─────────────── ┌ 🕵️ ИТОГ ОГРАБЛЕНИЯ ┐ ───────────────")
     if random.choice([True, False]):
         update_coins(attacker['_id'], potential_amount)
         update_coins(target['_id'], -potential_amount)
         await add_xp(interaction, attacker['_id'], 20)
         
         result_embed.color = 0x2ECC71
-        result_embed.description = f"🎉 Успех! Украдено: **+{potential_amount:,}**"
+        result_embed.add_field(name="✅ Статус", value=text_blue(f"Успех! Украдено: +{potential_amount:,} Колов"), inline=False)
         result_embed.set_image(url="https://i.pinimg.com/originals/58/23/81/582381e4e65d4f6a027116695445d649.gif")
     else:
         update_coins(attacker['_id'], -potential_amount)
         result_embed.color = 0xE74C3C
-        result_embed.description = f"🚨 Заметили! Штраф: **-{potential_amount:,}**"
+        result_embed.add_field(name="🚨 Статус", value=text_red(f"Заметили! Штраф: {potential_amount:,} Колов"), inline=False)
         result_embed.set_image(url="https://i.pinimg.com/originals/1d/85/80/1d8580859a663c8c58d2aa9ff9dc87c8.gif")
         
+    result_embed.set_footer(text="Aincrad Economy System")
     await interaction.edit_original_response(embed=result_embed)
 
 # ==========================================
@@ -624,7 +651,8 @@ class DuelAcceptView(discord.ui.View):
         if get_user(self.challenger.id)['coins'] < self.amount or get_user(self.target.id)['coins'] < self.amount:
             return await interaction.followup.send("❌ Недостаточно средств у одного из бойцов!", ephemeral=True)
         
-        embed = discord.Embed(title="⚔️ АРЕНА", description=f"Ставка: **{self.amount:,} Колов**.", color=0xE67E22)
+        embed = discord.Embed(title="─────────────── ┌ ⚔️ АРЕНА ┐ ───────────────", description="Бой начинается...", color=0xE67E22)
+        embed.add_field(name="Ставка", value=text_blue(f"{self.amount:,} Колов"), inline=False)
         embed.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
         msg = await interaction.followup.send(embed=embed)
         await asyncio.sleep(3.0)
@@ -636,7 +664,10 @@ class DuelAcceptView(discord.ui.View):
         update_coins(loser.id, -self.amount)
         await add_xp(interaction, winner.id, 25)
         
-        result_embed = discord.Embed(title="⚔️ ИТОГ", description=f"🏆 **Победитель:** {winner.mention} забрал **{self.amount:,} Колов**!", color=0x3498DB)
+        result_embed = discord.Embed(title="─────────────── ┌ ⚔️ ИТОГ БОЯ ┐ ───────────────", color=0x3498DB)
+        result_embed.add_field(name="🏆 Победитель", value=winner.mention, inline=False)
+        result_embed.add_field(name="💰 Приз", value=text_blue(f"+{self.amount:,} Колов"), inline=False)
+        result_embed.set_footer(text="Aincrad Battle System")
         await msg.edit(embed=result_embed, attachments=[])
 
     @discord.ui.button(label="Отклонить", style=discord.ButtonStyle.red, emoji="🏃")
@@ -659,7 +690,8 @@ async def duel(interaction: discord.Interaction, target: discord.Member, amount:
     if get_user(interaction.user.id)['coins'] < amount or get_user(target.id)['coins'] < amount:
         return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
     
-    embed = discord.Embed(title="⚔️ ВЫЗОВ", description=f"{interaction.user.mention} вызывает {target.mention}!\nСтавка: `{amount:,}` Колов.", color=0xE67E22)
+    embed = discord.Embed(title="⚔️ ВЫЗОВ НА АРЕНУ", description=f"{interaction.user.mention} вызывает {target.mention}!", color=0xE67E22)
+    embed.add_field(name="Ставка", value=text_blue(f"{amount:,} Колов"), inline=False)
     await interaction.response.send_message(content=target.mention, embed=embed, view=DuelAcceptView(interaction.user, target, amount))
 
 @bot.tree.command(name="dice", description="Игральные кости (Мин: 50)")
@@ -673,19 +705,20 @@ async def dice(interaction: discord.Interaction, amount: int):
     await asyncio.sleep(3.0)
 
     player_roll, bot_roll = random.randint(1, 6), random.randint(1, 6)
-    result_embed = discord.Embed(title="🎲 ИТОГ", color=0x2ECC71 if player_roll > bot_roll else 0xE74C3C if player_roll < bot_roll else 0xF1C40F)
-    result_embed.add_field(name="Вы", value=player_roll)
-    result_embed.add_field(name="Бот", value=bot_roll)
+    result_embed = discord.Embed(title="─────────────── ┌ 🎲 ИТОГ ┐ ───────────────", color=0x2ECC71 if player_roll > bot_roll else 0xE74C3C if player_roll < bot_roll else 0xF1C40F)
+    result_embed.add_field(name="Вы", value=text_blue(player_roll), inline=True)
+    result_embed.add_field(name="Бот", value=text_blue(bot_roll), inline=True)
     
     if player_roll > bot_roll:
         update_coins(interaction.user.id, amount * 2)
-        result_embed.add_field(name="Выигрыш", value=f"+{amount}", inline=False)
+        result_embed.add_field(name="💼 Выигрыш", value=text_blue(f"+{amount} Колов"), inline=False)
     elif player_roll < bot_roll: 
-        result_embed.add_field(name="Проигрыш", value=f"-{amount}", inline=False)
+        result_embed.add_field(name="💼 Проигрыш", value=text_red(f"{amount} Колов"), inline=False)
     else:
         update_coins(interaction.user.id, amount)
-        result_embed.description = "🤝 Ничья."
+        result_embed.description = "🤝 Ничья. Возврат ставки."
         
+    result_embed.set_footer(text="Aincrad Casino")
     await interaction.edit_original_response(embed=result_embed, attachments=[])
     await add_xp(interaction, interaction.user.id, random.randint(5, 10))
 
@@ -701,15 +734,15 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
     await asyncio.sleep(3.0)
 
     result_flip = random.choice(["орел", "решка"])
-    result_embed = discord.Embed(title="🪙 РЕЗУЛЬТАТ", color=0x2ECC71 if choice == result_flip else 0xE74C3C)
-    result_embed.add_field(name="Выпало", value=result_flip.upper(), inline=False)
+    result_embed = discord.Embed(title="🪙 РЕЗУЛЬТАТ МОНЕТКИ", color=0x2ECC71 if choice == result_flip else 0xE74C3C)
+    result_embed.add_field(name="🎯 Выпало", value=text_blue(result_flip.upper()), inline=False)
     
     if choice == result_flip:
         update_coins(interaction.user.id, amount * 2)
-        result_embed.add_field(name="Выигрыш", value=f"+{amount}", inline=False)
+        result_embed.add_field(name="💼 Выигрыш", value=text_blue(f"+{amount} Колов"), inline=False)
     else: 
-        result_embed.add_field(name="Проигрыш", value=f"-{amount}", inline=False)
-    
+        result_embed.add_field(name="💼 Проигрыш", value=text_red(f"{amount} Колов"), inline=False)
+        
     await interaction.edit_original_response(embed=result_embed, attachments=[])
     await add_xp(interaction, interaction.user.id, random.randint(5, 15))
 
@@ -718,21 +751,21 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
 async def roulette(interaction: discord.Interaction, amount: int):
     if not await check_gambling(interaction, amount): return
     
-    embed = discord.Embed(title="🎯 РУССКАЯ РУЛЕТКА", description="Вращаем...", color=0xE74C3C)
+    embed = discord.Embed(title="🎯 РУССКАЯ РУЛЕТКА", description="Вращаем барабан...", color=0xE74C3C)
     embed.set_image(url="https://i.pinimg.com/originals/ac/56/c5/ac56c5c7e6037a698e22c9a30a8dccda.gif")
     await interaction.response.send_message(embed=embed)
     await asyncio.sleep(3.0)
 
     shot = random.choice([True, False, False, False, False, False])
-    result_embed = discord.Embed(title="🎯 ИТОГ", color=0xE74C3C if shot else 0x2ECC71)
+    result_embed = discord.Embed(title="🎯 ИТОГ РУССКОЙ РУЛЕТКИ", color=0xE74C3C if shot else 0x2ECC71)
     
     if not shot:
         update_coins(interaction.user.id, amount * 2)
-        result_embed.add_field(name="Барабан", value="Пусто (Щелк)", inline=False)
-        result_embed.add_field(name="Выигрыш", value=f"+{amount}", inline=False)
+        result_embed.add_field(name="💀 Барабан", value=text_blue("Пусто (Щелк)"), inline=False)
+        result_embed.add_field(name="💼 Выигрыш", value=text_blue(f"+{amount} Колов"), inline=False)
     else:
-        result_embed.add_field(name="Барабан", value="Выстрел (БАХ)", inline=False)
-        result_embed.add_field(name="Проигрыш", value=f"-{amount}", inline=False)
+        result_embed.add_field(name="💀 Барабан", value=text_red("Смертельный выстрел (БАХ)"), inline=False)
+        result_embed.add_field(name="💼 Проигрыш", value=text_red(f"{amount} Колов"), inline=False)
         
     await interaction.edit_original_response(embed=result_embed, attachments=[])
     await add_xp(interaction, interaction.user.id, random.randint(10, 20))
@@ -785,7 +818,7 @@ class ShopButtonsView(discord.ui.View):
     def __init__(self): 
         super().__init__(timeout=300)
         
-    @discord.ui.button(label="Неприкасаемый (15k)", style=discord.ButtonStyle.blurple, emoji="🛡️")
+    @discord.ui.button(label="Неприкасаемый (15,000)", style=discord.ButtonStyle.blurple, emoji="🛡️")
     async def buy_untouchable(self, interaction: discord.Interaction, button: discord.ui.Button):
         role = discord.utils.get(interaction.guild.roles, name="Неприкасаемый")
         if not role: 
@@ -799,7 +832,7 @@ class ShopButtonsView(discord.ui.View):
         await interaction.user.add_roles(role)
         await interaction.response.send_message("🎉 Статус куплен!", ephemeral=True)
         
-    @discord.ui.button(label="Кастом роль (10k)", style=discord.ButtonStyle.green, emoji="✨")
+    @discord.ui.button(label="Кастомная роль (10,000)", style=discord.ButtonStyle.green, emoji="✨")
     async def buy_custom_role(self, interaction: discord.Interaction, button: discord.ui.Button):
         if custom_roles_coll.count_documents({"user_id": interaction.user.id}) >= 2: 
             return await interaction.response.send_message("❌ Лимит ролей!", ephemeral=True)
@@ -808,7 +841,7 @@ class ShopButtonsView(discord.ui.View):
             
         await interaction.response.send_modal(CustomRoleModal(10000))
         
-    @discord.ui.button(label="Титул (5k)", style=discord.ButtonStyle.grey, emoji="👑")
+    @discord.ui.button(label="Кастомный титул (5,000)", style=discord.ButtonStyle.grey, emoji="👑")
     async def buy_custom_title(self, interaction: discord.Interaction, button: discord.ui.Button):
         if get_user(interaction.user.id)['coins'] < 5000: 
             return await interaction.response.send_message("❌ Нет средств!", ephemeral=True)
@@ -818,8 +851,14 @@ class ShopButtonsView(discord.ui.View):
 @bot.tree.command(name="shop", description="Магазин предметов")
 @check_maintenance()
 async def shop(interaction: discord.Interaction):
-    embed = discord.Embed(title="🛒 МАГАЗИН АЙНКРАДА", description="Выберите привилегию:", color=0x2B2D31)
+    embed = discord.Embed(title="🛒 ЦЕНТРАЛЬНЫЙ ИГРОВОЙ МАГАЗИН АЙНКРАДА", description="Добро пожаловать в торговый интерфейс системы. Выберите нужную привилегию для покупки с помощью кнопок ниже.", color=0x2B2D31)
+    
+    embed.add_field(name="🛡️ Элитный статус «Неприкасаемый»", value=f"{text_blue('Стоимость: 15,000 Колов')}Обеспечивает абсолютный и бессрочный иммунитет от любых попыток карманных краж и грабежей другими игроками.", inline=False)
+    embed.add_field(name="✨ Персональная Кастомная Роль", value=f"{text_blue('Стоимость: 10,000 Колов')}Позволяет зарегистрировать собственное уникальное имя роли и персональный цвет в формате HEX с выдачей в ваш профиль.", inline=False)
+    embed.add_field(name="👑 Уникальный Кастомный Титул", value=f"{text_blue('Стоимость: 5,000 Колов')}Устанавливает индивидуальный престижный текстовый статус, который отображается в вашем персональном `/profile`.", inline=False)
+    
     embed.set_image(url="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExMmZrb210em05Ync0M2p6bnE2anJwZGM2NDk2MG9ieDluN3JzbTk2ZCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/DU3DhzJli9dsc/giphy.gif")
+    embed.set_footer(text="Aincrad Economy System • Используйте кнопки интерфейса для взаимодействия")
     await interaction.response.send_message(embed=embed, view=ShopButtonsView())
 
 class EditRoleModal(discord.ui.Modal, title="Редактирование"):
@@ -896,7 +935,6 @@ async def deleterole(interaction: discord.Interaction):
         await inter.response.send_message("🗑️ Роль удалена!", ephemeral=True)
 
     await interaction.response.send_message(embed=discord.Embed(title="🗑️ УДАЛЕНИЕ", color=0xE74C3C), view=SelectRoleView(roles, delete_callback), ephemeral=True)
-
 
 @bot.tree.command(name="settitle", description="Выбрать титул")
 @check_maintenance()
@@ -978,8 +1016,8 @@ class GuildMainView(discord.ui.View):
         
         embed = discord.Embed(title=f"🛡️ {self.guild_name}", color=0x9B59B6)
         embed.add_field(name="👑 Лидер", value=f"<@{guild_data['leader_id']}>", inline=False)
-        embed.add_field(name="💰 Казна", value=f"{guild_data.get('bank', 0):,}", inline=True)
-        embed.add_field(name="🎟️ Вход", value=f"{guild_data.get('entry_fee', 0):,}", inline=True)
+        embed.add_field(name="💰 Казна", value=text_blue(f"{guild_data.get('bank', 0):,} Колов"), inline=True)
+        embed.add_field(name="🎟️ Вход", value=text_blue(f"{guild_data.get('entry_fee', 0):,} Колов"), inline=True)
         embed.add_field(name=f"👥 Участники ({len(members)})", value=", ".join([f"<@{x['_id']}>" for x in members]), inline=False)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1013,7 +1051,7 @@ class GuildMainView(discord.ui.View):
 @bot.tree.command(name="guild", description="Меню гильдий")
 @check_maintenance()
 async def guild_menu(interaction: discord.Interaction):
-    embed = discord.Embed(title="🏰 ГИЛЬДИИ", color=0x2B2D31)
+    embed = discord.Embed(title="────── ┌ 🏰 ГИЛЬДИИ АЙНКРАДА ┐ ──────", description="Используйте кнопки ниже для взаимодействия:", color=0x2B2D31)
     embed.set_image(url="https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExcDdwNWNmdnRyOGJlNW1kYmYzNm12N3Vyc3diaGlzZm92ajZnZ2F1YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XG444KXEaA3zW/giphy.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
@@ -1074,9 +1112,9 @@ class AuctionPagingView(discord.ui.View):
         await interaction.response.send_message(f"🎉 Куплено: **{item['role_name']}**!", ephemeral=True)
 
     def get_embed(self):
-        embed = discord.Embed(title="🏛️ АУКЦИОН", color=0xFFD700)
+        embed = discord.Embed(title="─────────────── ┌ 🏛️ АУКЦИОН ┐ ───────────────", color=0xFFD700)
         for item in self.items[self.page * self.per_page : (self.page + 1) * self.per_page]:
-            embed.add_field(name=f"📦 {item['role_name']}", value=f"Цена: {item['price']:,}\nПродавец: <@{item['seller_id']}>", inline=False)
+            embed.add_field(name=f"📦 {item['role_name']}", value=f"Цена: {text_blue(f'{item['price']:,}')} Продавец: <@{item['seller_id']}>", inline=False)
         return embed
 
 @bot.tree.command(name="auction", description="Аукцион")
@@ -1220,7 +1258,10 @@ class IdeaModal(discord.ui.Modal, title="Идея"):
             @discord.ui.button(label="Одобрить", style=discord.ButtonStyle.green, emoji="✅")
             async def approve(self, admin_inter: discord.Interaction, button: discord.ui.Button):
                 public_channel = admin_inter.guild.get_channel(PUBLIC_IDEA_CHANNEL_ID)
-                public_embed = discord.Embed(title="✨ ОДОБРЕННАЯ ИДЕЯ", description=f"{self.idea_text}\n\n**От:** {interaction.user.mention}", color=0x2B2D31)
+                public_embed = discord.Embed(title="✅ ИДЕЯ ОДОБРЕНА И ОПУБЛИКОВАНА", color=0x2ECC71)
+                public_embed.add_field(name="От пользователя:", value=interaction.user.mention, inline=False)
+                public_embed.add_field(name="Текст:", value=self.idea_text.value, inline=False)
+                public_embed.add_field(name="Проверил модератор:", value=admin_inter.user.mention, inline=False)
                 msg = await public_channel.send(embed=public_embed)
                 await msg.add_reaction("👍")
                 await msg.add_reaction("👎")
@@ -1230,8 +1271,13 @@ class IdeaModal(discord.ui.Modal, title="Идея"):
 
             @discord.ui.button(label="Отклонить", style=discord.ButtonStyle.red, emoji="❌")
             async def reject(self, admin_inter: discord.Interaction, button: discord.ui.Button):
+                reject_embed = discord.Embed(title="❌ ИДЕЯ ОТКЛОНЕНА", color=0xE74C3C)
+                reject_embed.add_field(name="От пользователя:", value=interaction.user.mention, inline=False)
+                reject_embed.add_field(name="Текст:", value=self.idea_text.value, inline=False)
+                reject_embed.add_field(name="Отклонил модератор:", value=admin_inter.user.mention, inline=False)
+                
                 for child in self.children: child.disabled = True
-                await admin_inter.response.edit_message(content="❌ Отклонено", view=self)
+                await admin_inter.response.edit_message(embed=reject_embed, view=self)
                 
         await admin_channel.send(embed=embed, view=AdminIdeaView())
         await interaction.response.send_message("✅ Отправлено!", ephemeral=True)
@@ -1270,9 +1316,13 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
         
         docs_channel = interaction.guild.get_channel(DOCS_CHANNEL_ID)
         if docs_channel:
-            docs_embed = discord.Embed(title="📁 DOCС", color=0x2B2D31)
-            docs_embed.add_field(name="Игрок", value=member.mention)
-            docs_embed.add_field(name="Статус", value=gender)
+            docs_embed = discord.Embed(title="────── ┌ 📁 DOCC: ИДЕНТИФИКАЦИЯ ┐ ──────", color=0x2B2D31)
+            docs_embed.add_field(name="Пользователь", value=f"{member.mention}\n`{member.id}`", inline=True)
+            docs_embed.add_field(name="Выданный статус", value=gender, inline=True)
+            docs_embed.add_field(name="Саппорт / Модер", value=interaction.user.mention, inline=False)
+            docs_embed.add_field(name="Аккаунт создан", value=f"<t:{int(member.created_at.timestamp())}:F>", inline=False)
+            docs_embed.add_field(name="Discord Sensor", value=f"🔗 [Открыть профиль](https://discord.com/users/{member.id})", inline=False)
+            docs_embed.set_thumbnail(url=member.display_avatar.url)
             await docs_channel.send(embed=docs_embed)
     except Exception: 
         await interaction.response.send_message("❌ Ошибка при выдаче роли.", ephemeral=True)
