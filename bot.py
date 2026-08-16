@@ -1128,7 +1128,7 @@ class GuildMainView(discord.ui.View):
 async def guild_menu(interaction: discord.Interaction):
     embed = discord.Embed(title="▬▬ ┌ 🏰 ГИЛЬДИИ АЙНКРАДА ┐ ▬▬", description="Используйте кнопки ниже для взаимодействия:", color=0x2B2D31)
     # Generic SAO Theme Banner to match the screenshot layout
-    embed.set_image(url="https://media.tenor.com/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
+    embed.set_image(url="https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExcDdwNWNmdnRyOGJlNW1kYmYzNm12N3Vyc3diaGlzZm92ajZnZ2F1YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XG444KXEaA3zW/giphy.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 # ==========================================
