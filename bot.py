@@ -327,30 +327,57 @@ async def balance(interaction: discord.Interaction, member: discord.Member = Non
 @check_maintenance()
 async def profile(interaction: discord.Interaction, member: discord.Member = None):
     target = member or interaction.user
+    
+    # 1. Загрузочный экран (SAO Прелоадер)
+    embed_load = discord.Embed(color=0x2B2D31)
+    embed_load.set_author(name="Профиль")
+    embed_load.description = f"{interaction.user.mention}, профиль загружается..."
+    embed_load.set_thumbnail(url=target.display_avatar.url)
+    
+    await interaction.response.send_message(embed=embed_load)
+    
+    # Эффект подгрузки системы
+    await asyncio.sleep(1.5)
+    
+    # 2. Формирование основного профиля (Стиль Aruku/Aincrad)
     user_data = get_user(target.id)
     next_level_xp = int(35 * (user_data['level'] ** 1.85) + 80 * user_data['level'] + 40)
     
-    progress = int((user_data['xp'] / next_level_xp) * 10 if next_level_xp > 0 else 0)
-    bar = "🟩" * progress + "⬛" * (10 - progress)
+    # Длинный бар для XP
+    progress = int((user_data['xp'] / next_level_xp) * 20 if next_level_xp > 0 else 0)
+    bar_filled = "█" * progress
+    bar_empty = "▒" * (20 - progress)
+    full_bar = f"{bar_filled}{bar_empty}"
     
     voice_hours = int(user_data['voice_time'] // 3600)
     voice_minutes = int((user_data['voice_time'] % 3600) // 60)
 
-    embed = discord.Embed(title=f"🛡️ ИГРОВОЙ ПРОФИЛЬ: {target.display_name}", color=0x00BFFF)
+    embed = discord.Embed(color=0x00BFFF) # Технологичный голубой Cyan
+    embed.set_author(name=f"ИГРОВОЙ ПРОФИЛЬ: {target.display_name}")
     embed.set_thumbnail(url=target.display_avatar.url)
     
-    embed.add_field(name="⚔️ Этаж башни", value=text_blue(user_data['level']), inline=True)
-    embed.add_field(name="🪙 Капитал", value=text_blue(f"{user_data['coins']:,} Колов"), inline=True)
-    embed.add_field(name="🔥 Стрик входов", value=text_blue(f"{user_data['streak']} дн."), inline=True)
+    # Распределяем по колонкам
+    embed.add_field(name="⚔️ Этаж башни", value=f"```ansi\n\u001b[36m{user_data['level']}\u001b[0m\n```", inline=True)
+    embed.add_field(name="🪙 Капитал", value=f"```ansi\n\u001b[36m{user_data['coins']:,} Колов\u001b[0m\n```", inline=True)
+    embed.add_field(name="🔥 Стрик входов", value=f"```ansi\n\u001b[36m{user_data['streak']} дн.\u001b[0m\n```", inline=True)
     
-    embed.add_field(name="🎙️ Часы в Voice", value=text_blue(f"{voice_hours} ч. {voice_minutes} м."), inline=True)
-    embed.add_field(name="🏰 Гильдия", value=text_blue(user_data['guild_id'] or 'Нет'), inline=True)
+    embed.add_field(name="🎙️ Часы в Voice", value=f"```ansi\n\u001b[36m{voice_hours} ч. {voice_minutes} м.\u001b[0m\n```", inline=True)
+    embed.add_field(name="🏰 Гильдия", value=f"```ansi\n\u001b[36m{user_data['guild_id'] or 'Нет'}\u001b[0m\n```", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True) # Пустое поле для ровности сетки
     
-    embed.add_field(name="✨ Активный титул", value=text_blue(user_data['special_title']), inline=False)
-    embed.add_field(name="📊 Прогресс опыта (XP)", value=f"{user_data['xp']} / {next_level_xp} XP\n{bar}", inline=False)
+    embed.add_field(name="✨ Активный титул", value=f"```ansi\n\u001b[36m{user_data['special_title']}\u001b[0m\n```", inline=False)
+    
+    if user_data.get("partner_id"):
+        embed.add_field(name="💞 Партнер", value=f"<@{user_data['partner_id']}>", inline=False)
+
+    # XP Бар на всю ширину снизу
+    xp_text = f"**📊 Прогресс опыта (XP)**\n{user_data['xp']} / {next_level_xp} XP\n"
+    xp_bar = f"```ansi\n\u001b[36m{full_bar}\u001b[0m\n```"
+    embed.add_field(name="\u200b", value=xp_text + xp_bar, inline=False)
     
     embed.set_footer(text="Aincrad Status Management System")
-    await interaction.response.send_message(embed=embed)
+    
+    await interaction.edit_original_response(embed=embed)
 
 class MarryAcceptView(discord.ui.View):
     def __init__(self, proposer: discord.Member, target: discord.Member):
@@ -997,16 +1024,53 @@ class GuildModal(discord.ui.Modal):
             guilds_coll.update_one({"guild_name": self.guild_name}, {"$set": {"entry_fee": max(0, val_int)}})
             await interaction.response.send_message(f"✅ Цена входа установлена: {max(0, val_int)}.", ephemeral=True)
 
+class GuildJoinModal(discord.ui.Modal, title="Вступление в гильдию"):
+    guild_name_input = discord.ui.TextInput(label="Название гильдии", max_length=30)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        target_name = self.guild_name_input.value.strip()
+        guild_data = guilds_coll.find_one({"guild_name": {"$regex": f"^{target_name}$", "$options": "i"}})
+        if not guild_data:
+            return await interaction.response.send_message("❌ Гильдия не найдена!", ephemeral=True)
+            
+        user_data = get_user(interaction.user.id)
+        if user_data.get('guild_id'):
+            return await interaction.response.send_message("❌ Вы уже состоите в гильдии!", ephemeral=True)
+            
+        fee = guild_data.get('entry_fee', 0)
+        if user_data['coins'] < fee:
+            return await interaction.response.send_message(f"❌ Для входа требуется {fee:,} Колов!", ephemeral=True)
+            
+        update_coins(interaction.user.id, -fee)
+        if fee > 0:
+            guilds_coll.update_one({"guild_name": guild_data['guild_name']}, {"$inc": {"bank": fee}})
+            
+        users_coll.update_one({"_id": interaction.user.id}, {"$set": {"guild_id": guild_data['guild_name']}})
+        await interaction.response.send_message(f"✅ Вы успешно присоединились к гильдии **{guild_data['guild_name']}**!", ephemeral=True)
+
+class LeaderPanelView(discord.ui.View):
+    def __init__(self, guild_name):
+        super().__init__(timeout=300)
+        self.guild_name = guild_name
+        
+    @discord.ui.button(label="Установить налог", style=discord.ButtonStyle.grey, emoji="🪙")
+    async def set_fee(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GuildModal("fee", self.guild_name))
+
 class GuildMainView(discord.ui.View):
     def __init__(self, user_id: int):
         super().__init__(timeout=300)
         self.guild_name = get_user(user_id).get('guild_id')
 
-    @discord.ui.button(label="Создать (25k)", style=discord.ButtonStyle.green, emoji="🏰")
+    @discord.ui.button(label="Создать (25k)", style=discord.ButtonStyle.green, emoji="🏰", row=0)
     async def create_guild(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(GuildModal("create"))
+        
+    @discord.ui.button(label="Вступить", style=discord.ButtonStyle.blurple, emoji="🤝", row=0)
+    async def join_guild(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GuildJoinModal())
 
-    @discord.ui.button(label="Информация", style=discord.ButtonStyle.blurple, emoji="🛡️")
+    @discord.ui.button(label="Информация", style=discord.ButtonStyle.blurple, emoji="🛡️", row=0)
     async def info_guild(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.guild_name: 
             return await interaction.response.send_message("❌ Вы не состоите в гильдии!", ephemeral=True)
@@ -1022,13 +1086,24 @@ class GuildMainView(discord.ui.View):
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @discord.ui.button(label="Пополнить", style=discord.ButtonStyle.grey, emoji="💰")
+    @discord.ui.button(label="Пополнить", style=discord.ButtonStyle.grey, emoji="💰", row=1)
     async def deposit_guild(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.guild_name: 
             return await interaction.response.send_message("❌ Нет гильдии!", ephemeral=True)
         await interaction.response.send_modal(GuildModal("deposit", self.guild_name))
+        
+    @discord.ui.button(label="Панель лидера", style=discord.ButtonStyle.grey, emoji="⚙️", row=1)
+    async def leader_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.guild_name:
+            return await interaction.response.send_message("❌ Вы не состоите в гильдии!", ephemeral=True)
+            
+        guild_data = guilds_coll.find_one({"guild_name": self.guild_name})
+        if interaction.user.id != guild_data['leader_id'] and interaction.user.id not in guild_data.get('co_leaders', []):
+            return await interaction.response.send_message("❌ Ошибка доступа: Вы не являетесь лидером!", ephemeral=True)
+            
+        await interaction.response.send_message("⚙️ Панель управления гильдией открыта.", view=LeaderPanelView(self.guild_name), ephemeral=True)
 
-    @discord.ui.button(label="Покинуть", style=discord.ButtonStyle.red, emoji="🚪")
+    @discord.ui.button(label="Покинуть", style=discord.ButtonStyle.red, emoji="🚪", row=1)
     async def leave_guild(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.guild_name: 
             return await interaction.response.send_message("❌ Нет гильдии!", ephemeral=True)
@@ -1051,8 +1126,9 @@ class GuildMainView(discord.ui.View):
 @bot.tree.command(name="guild", description="Меню гильдий")
 @check_maintenance()
 async def guild_menu(interaction: discord.Interaction):
-    embed = discord.Embed(title="────── ┌ 🏰 ГИЛЬДИИ АЙНКРАДА ┐ ──────", description="Используйте кнопки ниже для взаимодействия:", color=0x2B2D31)
-    embed.set_image(url="https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExcDdwNWNmdnRyOGJlNW1kYmYzNm12N3Vyc3diaGlzZm92ajZnZ2F1YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XG444KXEaA3zW/giphy.gif")
+    embed = discord.Embed(title="▬▬ ┌ 🏰 ГИЛЬДИИ АЙНКРАДА ┐ ▬▬", description="Используйте кнопки ниже для взаимодействия:", color=0x2B2D31)
+    # Generic SAO Theme Banner to match the screenshot layout
+    embed.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 # ==========================================
