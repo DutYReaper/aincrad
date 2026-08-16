@@ -14,7 +14,7 @@ from keep_alive import keep_alive
 # 0. ФОРМАТИРОВАНИЕ ТЕКСТА (ЦВЕТА)
 # ==========================================
 def text_blue(text):
-    return f"```ansi\n\u001b[36m{text}\u001b[0m\n```"
+    return f"```ansi\n\u001b[1;36m{text}\u001b[0m\n```"
 
 def text_red(text):
     return f"```diff\n- {text}\n```"
@@ -357,22 +357,22 @@ async def profile(interaction: discord.Interaction, member: discord.Member = Non
     embed.set_thumbnail(url=target.display_avatar.url)
     
     # Распределяем по колонкам
-    embed.add_field(name="⚔️ Этаж башни", value=f"```ansi\n\u001b[36m{user_data['level']}\u001b[0m\n```", inline=True)
-    embed.add_field(name="🪙 Капитал", value=f"```ansi\n\u001b[36m{user_data['coins']:,} Колов\u001b[0m\n```", inline=True)
-    embed.add_field(name="🔥 Стрик входов", value=f"```ansi\n\u001b[36m{user_data['streak']} дн.\u001b[0m\n```", inline=True)
+    embed.add_field(name="⚔️ Этаж башни", value=f"```ansi\n\u001b[1;36m{user_data['level']}\u001b[0m\n```", inline=True)
+    embed.add_field(name="🪙 Капитал", value=f"```ansi\n\u001b[1;36m{user_data['coins']:,} Колов\u001b[0m\n```", inline=True)
+    embed.add_field(name="🔥 Стрик входов", value=f"```ansi\n\u001b[1;36m{user_data['streak']} дн.\u001b[0m\n```", inline=True)
     
-    embed.add_field(name="🎙️ Часы в Voice", value=f"```ansi\n\u001b[36m{voice_hours} ч. {voice_minutes} м.\u001b[0m\n```", inline=True)
-    embed.add_field(name="🏰 Гильдия", value=f"```ansi\n\u001b[36m{user_data['guild_id'] or 'Нет'}\u001b[0m\n```", inline=True)
+    embed.add_field(name="🎙️ Часы в Voice", value=f"```ansi\n\u001b[1;36m{voice_hours} ч. {voice_minutes} м.\u001b[0m\n```", inline=True)
+    embed.add_field(name="🏰 Гильдия", value=f"```ansi\n\u001b[1;36m{user_data['guild_id'] or 'Нет'}\u001b[0m\n```", inline=True)
     embed.add_field(name="\u200b", value="\u200b", inline=True) # Пустое поле для ровности сетки
     
-    embed.add_field(name="✨ Активный титул", value=f"```ansi\n\u001b[36m{user_data['special_title']}\u001b[0m\n```", inline=False)
+    embed.add_field(name="✨ Активный титул", value=f"```ansi\n\u001b[1;36m{user_data['special_title']}\u001b[0m\n```", inline=False)
     
     if user_data.get("partner_id"):
         embed.add_field(name="💞 Партнер", value=f"<@{user_data['partner_id']}>", inline=False)
 
     # XP Бар на всю ширину снизу
     xp_text = f"**📊 Прогресс опыта (XP)**\n{user_data['xp']} / {next_level_xp} XP\n"
-    xp_bar = f"```ansi\n\u001b[36m{full_bar}\u001b[0m\n```"
+    xp_bar = f"```ansi\n\u001b[1;36m{full_bar}\u001b[0m\n```"
     embed.add_field(name="\u200b", value=xp_text + xp_bar, inline=False)
     
     embed.set_footer(text="Aincrad Status Management System")
@@ -680,7 +680,7 @@ class DuelAcceptView(discord.ui.View):
         
         embed = discord.Embed(title="─────────────── ┌ ⚔️ АРЕНА ┐ ───────────────", description="Бой начинается...", color=0xE67E22)
         embed.add_field(name="Ставка", value=text_blue(f"{self.amount:,} Колов"), inline=False)
-        embed.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
+        embed.set_image(url="https://media.tenor.com/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
         msg = await interaction.followup.send(embed=embed)
         await asyncio.sleep(3.0)
         
@@ -1128,7 +1128,7 @@ class GuildMainView(discord.ui.View):
 async def guild_menu(interaction: discord.Interaction):
     embed = discord.Embed(title="▬▬ ┌ 🏰 ГИЛЬДИИ АЙНКРАДА ┐ ▬▬", description="Используйте кнопки ниже для взаимодействия:", color=0x2B2D31)
     # Generic SAO Theme Banner to match the screenshot layout
-    embed.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
+    embed.set_image(url="https://media.tenor.com/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 # ==========================================
@@ -1319,7 +1319,7 @@ async def stream(interaction: discord.Interaction):
     if not is_admin_or_mod(interaction.user): 
         return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
     embed = discord.Embed(title="🔴 ПРЯМОЙ ЭФИР", description="**Залетайте на стрим!**\n🔗 [КЛИКАЙ СЮДА](https://www.twitch.tv/treihaolvl31)", color=0x9146FF)
-    embed.set_image(url="https://media1.tenor.com/images/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
+    embed.set_image(url="https://media.tenor.com/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     await interaction.channel.send(content="@everyone", embed=embed)
     await interaction.response.send_message("✅ Анонс отправлен!", ephemeral=True)
 
@@ -1368,7 +1368,7 @@ async def setup_verify(interaction: discord.Interaction):
     if not is_admin_or_mod(interaction.user): 
         return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
     embed = discord.Embed(title="🛡️ ИДЕНТИФИКАЦИЯ", description="Зайдите в войс Ожидание верификации...", color=0x3498DB)
-    embed.set_image(url="https://media1.tenor.com/images/zLQ4_cEQY0AAAAAC/sao.gif")
+    embed.set_image(url="https://media.tenor.com/zLQ4_cEQY0AAAAAC/sao.gif")
     await interaction.channel.send(embed=embed)
     await interaction.response.send_message("✅ Установлено.", ephemeral=True)
 
@@ -1408,7 +1408,7 @@ async def setup_ranks(interaction: discord.Interaction):
     if not is_admin_or_mod(interaction.user): 
         return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
     embed = discord.Embed(title="⚡ ЭТАЖИ И НАГРАДЫ", description="Информация об иерархии башни...", color=0xE02653)
-    embed.set_image(url="https://media1.tenor.com/images/zLQ4_cEQY0AAAAAC/sao.gif")
+    embed.set_image(url="https://media.tenor.com/zLQ4_cEQY0AAAAAC/sao.gif")
     await interaction.channel.send(embed=embed)
     await interaction.response.send_message("✅ Готово.", ephemeral=True)
 
