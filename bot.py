@@ -13,13 +13,22 @@ from easy_pil import Editor, load_image_async, Font
 from keep_alive import keep_alive
 
 # ==========================================
-# 0. ФОРМАТИРОВАНИЕ ТЕКСТА (ЦВЕТА)
+# 0. ФОРМАТИРОВАНИЕ ТЕКСТА И ЧИСЕЛ
 # ==========================================
 def text_blue(text):
     return f"```ansi\n\u001b[1;36m{text}\u001b[0m\n```"
 
 def text_red(text):
     return f"```diff\n- {text}\n```"
+
+def format_number(num: int) -> str:
+    if num >= 1_000_000_000_000: return f"{num / 1_000_000_000_000:.2f}T"
+    elif num >= 1_000_000_000: return f"{num / 1_000_000_000:.2f}B"
+    elif num >= 1_000_000: return f"{num / 1_000_000:.2f}M"
+    elif num >= 1_000: return f"{num / 1_000:.2f}k"
+    return f"{num:,}".replace(",", " ")
+
+format_spaces = format_number
 
 # ==========================================
 # 1. НАСТРОЙКИ И БАЗА ДАННЫХ
@@ -350,7 +359,6 @@ async def on_message(message):
 # ==========================================
 # 4. ЭКОНОМИКА, ПРОФИЛЬ, БРАКИ
 # ==========================================
-# Замени этот блок примерно на строках 285–300:
 @bot.tree.command(name="balance", description="Посмотреть текущий баланс Колов")
 @check_maintenance()
 async def balance(interaction: discord.Interaction, member: discord.Member = None):
@@ -370,11 +378,9 @@ async def balance(interaction: discord.Interaction, member: discord.Member = Non
 async def profile(interaction: discord.Interaction, member: discord.Member = None):
     target = member or interaction.user
     
-    # 1. Формирование основного профиля (Стиль Aruku/Aincrad)
     user_data = get_user(target.id)
     next_level_xp = int(35 * (user_data['level'] ** 1.85) + 80 * user_data['level'] + 40)
     
-    # Длинный бар для XP
     progress = int((user_data['xp'] / next_level_xp) * 20 if next_level_xp > 0 else 0)
     bar_filled = "█" * progress
     bar_empty = "▒" * (20 - progress)
@@ -383,36 +389,32 @@ async def profile(interaction: discord.Interaction, member: discord.Member = Non
     voice_hours = int(user_data['voice_time'] // 3600)
     voice_minutes = int((user_data['voice_time'] % 3600) // 60)
 
-    # Нейтральный цвет боковой полосы под темную тему Discord (0x2B2D31)
     embed = discord.Embed(color=0x2B2D31)
     embed.set_author(name=f"ИГРОВОЙ ПРОФИЛЬ: {target.display_name}")
     embed.set_thumbnail(url=target.display_avatar.url)
     
-    # Форматируем капитал, чтобы огромные числа не переносились
     formatted_coins = format_number(user_data['coins'])
 
-    # Распределяем по колонкам
     embed.add_field(name="⚔️ Этаж башни", value=f"```ansi\n\u001b[1;36m{user_data['level']}\u001b[0m\n```", inline=True)
     embed.add_field(name="🪙 Капитал", value=f"```ansi\n\u001b[1;36m{formatted_coins} Колов\u001b[0m\n```", inline=True)
     embed.add_field(name="🔥 Стрик входов", value=f"```ansi\n\u001b[1;36m{user_data['streak']} дн.\u001b[0m\n```", inline=True)
     
     embed.add_field(name="🎙️ Часы в Voice", value=f"```ansi\n\u001b[1;36m{voice_hours} ч. {voice_minutes} м.\u001b[0m\n```", inline=True)
     embed.add_field(name="🏰 Гильдия", value=f"```ansi\n\u001b[1;36m{user_data['guild_id'] or 'Нет'}\u001b[0m\n```", inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True) # Пустое поле для ровности сетки
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
     
     embed.add_field(name="✨ Активный титул", value=f"```ansi\n\u001b[1;36m{user_data['special_title']}\u001b[0m\n```", inline=False)
     
     if user_data.get("partner_id"):
         embed.add_field(name="💞 Партнер", value=f"<@{user_data['partner_id']}>", inline=False)
 
-    # XP Бар на всю ширину снизу
     xp_text = f"**📊 Прогресс опыта (XP)**\n{user_data['xp']} / {next_level_xp} XP\n"
     xp_bar = f"```ansi\n\u001b[1;36m{full_bar}\u001b[0m\n```"
     embed.add_field(name="\u200b", value=xp_text + xp_bar, inline=False)
     
     embed.set_footer(text="Aincrad Status Management System")
     
-    await interaction.edit_original_response(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 class MarryAcceptView(discord.ui.View):
     def __init__(self, proposer: discord.Member, target: discord.Member):
@@ -527,11 +529,11 @@ async def leaderboard(interaction: discord.Interaction, category: str = "level")
     elif category == "coins":
         top = list(users_coll.find().sort("coins", -1).limit(10))
         title = "💰 ТОП-10 (КОЛЫ)"
-        desc = "\n".join([f"`#{i}` <@{u['_id']}> — **{u.get('coins', 0):,} Колов**" for i, u in enumerate(top, 1)])
+        desc = "\n".join([f"`#{i}` <@{u['_id']}> — **{format_spaces(u.get('coins', 0))} Колов**" for i, u in enumerate(top, 1)])
     elif category == "guilds":
         top = list(guilds_coll.find().sort("bank", -1).limit(10))
         title = "🏰 ТОП-10 ГИЛЬДИЙ"
-        desc = "\n".join([f"`#{i}` **{g['guild_name']}** — **{g.get('bank', 0):,} Колов**" for i, g in enumerate(top, 1)])
+        desc = "\n".join([f"`#{i}` **{g['guild_name']}** — **{format_spaces(g.get('bank', 0))} Колов**" for i, g in enumerate(top, 1)])
     else:
         top = list(users_coll.find().sort("voice_time", -1).limit(10))
         title = "🎙️ ТОП-10 (ВОЙС)"
@@ -554,9 +556,9 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
     update_coins(member.id, amount - fee)
 
     embed = discord.Embed(title="💸 ПЕРЕВОД УСПЕШЕН", description=f"Транзакция для {member.mention} проведена.", color=0x2B2D31)
-    embed.add_field(name="Списано", value=text_blue(f"{amount:,}"), inline=True)
-    embed.add_field(name="Зачислено", value=text_blue(f"{amount - fee:,}"), inline=True)
-    embed.add_field(name="Комиссия", value=text_red(f"{fee:,}"), inline=True)
+    embed.add_field(name="Списано", value=text_blue(format_spaces(amount)), inline=True)
+    embed.add_field(name="Зачислено", value=text_blue(format_spaces(amount - fee)), inline=True)
+    embed.add_field(name="Комиссия", value=text_red(format_spaces(fee)), inline=True)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="daily", description="Ежедневная награда")
@@ -714,7 +716,7 @@ class DuelAcceptView(discord.ui.View):
             return await interaction.followup.send("❌ Недостаточно средств у одного из бойцов!", ephemeral=True)
         
         embed = discord.Embed(title="─────────────── ┌ ⚔️ АРЕНА ┐ ───────────────", description="Бой начинается...", color=0xE67E22)
-        embed.add_field(name="Ставка", value=text_blue(f"{self.amount:,} Колов"), inline=False)
+        embed.add_field(name="Ставка", value=text_blue(f"{format_spaces(self.amount)} Колов"), inline=False)
         embed.set_image(url="https://media.tenor.com/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
         msg = await interaction.followup.send(embed=embed)
         await asyncio.sleep(3.0)
@@ -728,7 +730,7 @@ class DuelAcceptView(discord.ui.View):
         
         result_embed = discord.Embed(title="─────────────── ┌ ⚔️ ИТОГ БОЯ ┐ ───────────────", color=0x3498DB)
         result_embed.add_field(name="🏆 Победитель", value=winner.mention, inline=False)
-        result_embed.add_field(name="💰 Приз", value=text_blue(f"+{self.amount:,} Колов"), inline=False)
+        result_embed.add_field(name="💰 Приз", value=text_blue(f"+{format_spaces(self.amount)} Колов"), inline=False)
         result_embed.set_footer(text="Aincrad Battle System")
         await msg.edit(embed=result_embed, attachments=[])
 
@@ -753,7 +755,7 @@ async def duel(interaction: discord.Interaction, target: discord.Member, amount:
         return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
     
     embed = discord.Embed(title="⚔️ ВЫЗОВ НА АРЕНУ", description=f"{interaction.user.mention} вызывает {target.mention}!", color=0xE67E22)
-    embed.add_field(name="Ставка", value=text_blue(f"{amount:,} Колов"), inline=False)
+    embed.add_field(name="Ставка", value=text_blue(f"{format_spaces(amount)} Колов"), inline=False)
     await interaction.response.send_message(content=target.mention, embed=embed, view=DuelAcceptView(interaction.user, target, amount))
 
 @bot.tree.command(name="dice", description="Игральные кости (Мин: 50)")
@@ -773,9 +775,9 @@ async def dice(interaction: discord.Interaction, amount: int):
     
     if player_roll > bot_roll:
         update_coins(interaction.user.id, amount * 2)
-        result_embed.add_field(name="💼 Выигрыш", value=text_blue(f"+{amount} Колов"), inline=False)
+        result_embed.add_field(name="💼 Выигрыш", value=text_blue(f"+{format_spaces(amount)} Колов"), inline=False)
     elif player_roll < bot_roll: 
-        result_embed.add_field(name="💼 Проигрыш", value=text_red(f"{amount} Колов"), inline=False)
+        result_embed.add_field(name="💼 Проигрыш", value=text_red(f"{format_spaces(amount)} Колов"), inline=False)
     else:
         update_coins(interaction.user.id, amount)
         result_embed.description = "🤝 Ничья. Возврат ставки."
@@ -798,25 +800,20 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
     result_flip = random.choice(["орел", "решка"])
     is_win = choice == result_flip
     
-    # Цвета: 0x2ECC71 (зеленый) для победы, 0xE74C3C (красный) для поражения
     color = 0x2ECC71 if is_win else 0xE74C3C
     result_embed = discord.Embed(title="🪙 РЕЗУЛЬТАТ МОНЕТКИ", color=color)
     
-    # Нейтральный белый цвет для названия стороны
     result_embed.add_field(name="🎯 Выпало", value=f"```ansi\n\u001b[0;37m{result_flip.upper()}\u001b[0m\n```", inline=False)
     
     if is_win:
         update_coins(interaction.user.id, amount * 2)
-        # Насыщенный зеленый для выигрыша
-        result_embed.add_field(name="💰 Статус", value=f"```ansi\n\u001b[1;32mПобеда! +{amount} Колов\u001b[0m\n```", inline=False)
+        result_embed.add_field(name="💰 Статус", value=f"```ansi\n\u001b[1;32mПобеда! +{format_spaces(amount)} Колов\u001b[0m\n```", inline=False)
     else: 
-        # Красный для проигрыша
-        result_embed.add_field(name="💰 Статус", value=text_red(f"Проигрыш: -{amount} Колов"), inline=False)
+        result_embed.add_field(name="💰 Статус", value=text_red(f"Проигрыш: -{format_spaces(amount)} Колов"), inline=False)
         
     await interaction.edit_original_response(embed=result_embed, attachments=[])
     await add_xp(interaction, interaction.user.id, random.randint(5, 15))
 
-# Строки 632–659
 @bot.tree.command(name="roulette", description="Русская рулетка (Мин: 50)")
 @check_maintenance()
 async def roulette(interaction: discord.Interaction, amount: int):
@@ -833,13 +830,11 @@ async def roulette(interaction: discord.Interaction, amount: int):
     
     if not shot:
         update_coins(interaction.user.id, amount * 2)
-        # Насыщенный зеленый цвет для победного исхода
         result_embed.add_field(name="💀 Барабан", value=f"```ansi\n\u001b[1;32mПусто (Щелк)\u001b[0m\n```", inline=False)
-        result_embed.add_field(name="💰 Статус", value=f"```ansi\n\u001b[1;32mПобеда! +{amount} Колов\u001b[0m\n```", inline=False)
+        result_embed.add_field(name="💰 Статус", value=f"```ansi\n\u001b[1;32mПобеда! +{format_spaces(amount)} Колов\u001b[0m\n```", inline=False)
     else:
-        # Красный цвет для проигрыша
         result_embed.add_field(name="💀 Барабан", value=text_red("Смертельный выстрел (БАХ)"), inline=False)
-        result_embed.add_field(name="💰 Статус", value=text_red(f"Проигрыш: -{amount} Колов"), inline=False)
+        result_embed.add_field(name="💰 Статус", value=text_red(f"Проигрыш: -{format_spaces(amount)} Колов"), inline=False)
         
     await interaction.edit_original_response(embed=result_embed, attachments=[])
     await add_xp(interaction, interaction.user.id, random.randint(10, 20))
@@ -866,7 +861,7 @@ class CustomRoleModal(discord.ui.Modal, title="Кастомная роль"):
             return await interaction.response.send_message("❌ Неверный HEX!", ephemeral=True)
         
         update_coins(interaction.user.id, -self.price)
-        try:
+        try: 
             new_role = await interaction.guild.create_role(name=role_n, color=discord.Color(color_int))
             await interaction.user.add_roles(new_role)
             custom_roles_coll.insert_one({"role_id": new_role.id, "user_id": interaction.user.id, "role_name": role_n})
@@ -892,7 +887,7 @@ class ShopButtonsView(discord.ui.View):
     def __init__(self): 
         super().__init__(timeout=300)
         
-    @discord.ui.button(label="Неприкасаемый (15,000)", style=discord.ButtonStyle.blurple, emoji="🛡️")
+    @discord.ui.button(label="Неприкасаемый (15 000)", style=discord.ButtonStyle.blurple, emoji="🛡️")
     async def buy_untouchable(self, interaction: discord.Interaction, button: discord.ui.Button):
         role = discord.utils.get(interaction.guild.roles, name="Неприкасаемый")
         if not role: 
@@ -906,7 +901,7 @@ class ShopButtonsView(discord.ui.View):
         await interaction.user.add_roles(role)
         await interaction.response.send_message("🎉 Статус куплен!", ephemeral=True)
         
-    @discord.ui.button(label="Кастомная роль (10,000)", style=discord.ButtonStyle.green, emoji="✨")
+    @discord.ui.button(label="Кастомная роль (10 000)", style=discord.ButtonStyle.green, emoji="✨")
     async def buy_custom_role(self, interaction: discord.Interaction, button: discord.ui.Button):
         if custom_roles_coll.count_documents({"user_id": interaction.user.id}) >= 2: 
             return await interaction.response.send_message("❌ Лимит ролей!", ephemeral=True)
@@ -915,7 +910,7 @@ class ShopButtonsView(discord.ui.View):
             
         await interaction.response.send_modal(CustomRoleModal(10000))
         
-    @discord.ui.button(label="Кастомный титул (5,000)", style=discord.ButtonStyle.grey, emoji="👑")
+    @discord.ui.button(label="Кастомный титул (5 000)", style=discord.ButtonStyle.grey, emoji="👑")
     async def buy_custom_title(self, interaction: discord.Interaction, button: discord.ui.Button):
         if get_user(interaction.user.id)['coins'] < 5000: 
             return await interaction.response.send_message("❌ Нет средств!", ephemeral=True)
@@ -1062,14 +1057,14 @@ class GuildModal(discord.ui.Modal):
                 
             update_coins(interaction.user.id, -val_int)
             guilds_coll.update_one({"guild_name": self.guild_name}, {"$inc": {"bank": val_int}})
-            await interaction.response.send_message(f"✅ Внесено {val_int} Колов в казну!", ephemeral=True)
+            await interaction.response.send_message(f"✅ Внесено {format_spaces(val_int)} Колов в казну!", ephemeral=True)
             
         elif self.mode == "fee":
             try: val_int = int(value)
             except Exception: return await interaction.response.send_message("❌ Ошибка формата!", ephemeral=True)
             
             guilds_coll.update_one({"guild_name": self.guild_name}, {"$set": {"entry_fee": max(0, val_int)}})
-            await interaction.response.send_message(f"✅ Цена входа установлена: {max(0, val_int)}.", ephemeral=True)
+            await interaction.response.send_message(f"✅ Цена входа установлена: {format_spaces(max(0, val_int))}.", ephemeral=True)
 
 class GuildJoinModal(discord.ui.Modal, title="Вступление в гильдию"):
     guild_name_input = discord.ui.TextInput(label="Название гильдии", max_length=30)
@@ -1086,7 +1081,7 @@ class GuildJoinModal(discord.ui.Modal, title="Вступление в гильд
             
         fee = guild_data.get('entry_fee', 0)
         if user_data['coins'] < fee:
-            return await interaction.response.send_message(f"❌ Для входа требуется {fee:,} Колов!", ephemeral=True)
+            return await interaction.response.send_message(f"❌ Для входа требуется {format_spaces(fee)} Колов!", ephemeral=True)
             
         update_coins(interaction.user.id, -fee)
         if fee > 0:
@@ -1104,7 +1099,6 @@ class LeaderPanelView(discord.ui.View):
     async def set_fee(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(GuildModal("fee", self.guild_name))
 
-# Блок GuildMainView (примерно строки 740–780)
 class GuildMainView(discord.ui.View):
     def __init__(self, user_id: int):
         super().__init__(timeout=300)
@@ -1130,8 +1124,8 @@ class GuildMainView(discord.ui.View):
         
         embed = discord.Embed(title=f"🛡️ {self.guild_name}", color=0x9B59B6)
         embed.add_field(name="👑 Лидер", value=f"<@{guild_data['leader_id']}>", inline=False)
-        embed.add_field(name="💰 Казна", value=text_blue(f"{guild_data.get('bank', 0):,} Колов"), inline=True)
-        embed.add_field(name="🎟️ Вход", value=text_blue(f"{guild_data.get('entry_fee', 0):,} Колов"), inline=True)
+        embed.add_field(name="💰 Казна", value=text_blue(f"{format_spaces(guild_data.get('bank', 0))} Колов"), inline=True)
+        embed.add_field(name="🎟️ Вход", value=text_blue(f"{format_spaces(guild_data.get('entry_fee', 0))} Колов"), inline=True)
         embed.add_field(name=f"👥 Участники ({len(members)})", value=", ".join([f"<@{x['_id']}>" for x in members]), inline=False)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1171,7 +1165,6 @@ class GuildMainView(discord.ui.View):
                 
         await interaction.response.send_message("🚪 Вы покинули гильдию.", ephemeral=True)
 
-# Замени строки 812–836:
 @bot.tree.command(name="guild", description="Меню гильдий")
 @check_maintenance()
 async def guild_menu(interaction: discord.Interaction):
@@ -1203,7 +1196,7 @@ class AuctionPagingView(discord.ui.View):
         
         slice_items = self.items[self.page * self.per_page : (self.page + 1) * self.per_page]
         if slice_items:
-            select = discord.ui.Select(options=[discord.SelectOption(label=item['role_name'], description=f"{item['price']:,}", value=str(item['sale_id'])) for item in slice_items])
+            select = discord.ui.Select(options=[discord.SelectOption(label=item['role_name'], description=f"{format_spaces(item['price'])}", value=str(item['sale_id'])) for item in slice_items])
             select.callback = self.buy_item
             self.add_item(select)
 
@@ -1242,7 +1235,7 @@ class AuctionPagingView(discord.ui.View):
     def get_embed(self):
         embed = discord.Embed(title="─────────────── ┌ 🏛️ АУКЦИОН ┐ ───────────────", color=0xFFD700)
         for item in self.items[self.page * self.per_page : (self.page + 1) * self.per_page]:
-            embed.add_field(name=f"📦 {item['role_name']}", value=f"Цена: {text_blue(f'{item['price']:,}')} Продавец: <@{item['seller_id']}>", inline=False)
+            embed.add_field(name=f"📦 {item['role_name']}", value=f"Цена: {text_blue(format_spaces(item['price']))} Продавец: <@{item['seller_id']}>", inline=False)
         return embed
 
 @bot.tree.command(name="auction", description="Аукцион")
@@ -1295,7 +1288,7 @@ async def setcoins(interaction: discord.Interaction, member: discord.Member, amo
         return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
     get_user(member.id)
     users_coll.update_one({"_id": member.id}, {"$set": {"coins": amount}})
-    await interaction.response.send_message(f"✅ Баланс {member.mention} = {amount}.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Баланс {member.mention} = {format_spaces(amount)}.", ephemeral=True)
 
 @bot.tree.command(name="givecoins", description="[АДМИН] Выдать Колы")
 async def givecoins(interaction: discord.Interaction, member: discord.Member, amount: int):
@@ -1303,7 +1296,7 @@ async def givecoins(interaction: discord.Interaction, member: discord.Member, am
         return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
     get_user(member.id)
     update_coins(member.id, amount)
-    await interaction.response.send_message(f"✅ Выдано {amount}.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Выдано {format_spaces(amount)}.", ephemeral=True)
 
 @bot.tree.command(name="takecoins", description="[АДМИН] Забрать Колы")
 async def takecoins(interaction: discord.Interaction, member: discord.Member, amount: int):
@@ -1311,7 +1304,7 @@ async def takecoins(interaction: discord.Interaction, member: discord.Member, am
         return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
     get_user(member.id)
     update_coins(member.id, -amount)
-    await interaction.response.send_message(f"🔻 Списано {amount}.", ephemeral=True)
+    await interaction.response.send_message(f"🔻 Списано {format_spaces(amount)}.", ephemeral=True)
 
 @bot.tree.command(name="setstreak", description="[АДМИН] Установить стрик")
 async def setstreak(interaction: discord.Interaction, member: discord.Member, days: int):
