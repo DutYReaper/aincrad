@@ -21,6 +21,9 @@ def text_blue(text):
 def text_red(text):
     return f"```diff\n- {text}\n```"
 
+def text_green(text):
+    return f"```diff\n+ {text}\n```"
+
 def format_number(num: int) -> str:
     if num >= 1_000_000_000_000: return f"{num / 1_000_000_000_000:.2f}T"
     elif num >= 1_000_000_000: return f"{num / 1_000_000_000:.2f}B"
@@ -769,15 +772,18 @@ async def dice(interaction: discord.Interaction, amount: int):
     await asyncio.sleep(3.0)
 
     player_roll, bot_roll = random.randint(1, 6), random.randint(1, 6)
-    result_embed = discord.Embed(title="─────────────── ┌ 🎲 ИТОГ ┐ ───────────────", color=0x2ECC71 if player_roll > bot_roll else 0xE74C3C if player_roll < bot_roll else 0xF1C40F)
+    is_win = player_roll > bot_roll
+    color = 0x2ECC71 if is_win else 0xE74C3C if player_roll < bot_roll else 0xF1C40F
+    
+    result_embed = discord.Embed(title="─────────────── ┌ 🎲 ИТОГ ┐ ───────────────", color=color)
     result_embed.add_field(name="Вы", value=text_blue(player_roll), inline=True)
     result_embed.add_field(name="Бот", value=text_blue(bot_roll), inline=True)
     
-    if player_roll > bot_roll:
+    if is_win:
         update_coins(interaction.user.id, amount * 2)
-        result_embed.add_field(name="💼 Выигрыш", value=text_blue(f"+{format_spaces(amount)} Колов"), inline=False)
+        result_embed.add_field(name="💼 Выигрыш", value=text_green(f"+{format_spaces(amount)} Колов"), inline=False)
     elif player_roll < bot_roll: 
-        result_embed.add_field(name="💼 Проигрыш", value=text_red(f"{format_spaces(amount)} Колов"), inline=False)
+        result_embed.add_field(name="💼 Проигрыш", value=text_red(f"-{format_spaces(amount)} Колов"), inline=False)
     else:
         update_coins(interaction.user.id, amount)
         result_embed.description = "🤝 Ничья. Возврат ставки."
@@ -807,7 +813,7 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
     
     if is_win:
         update_coins(interaction.user.id, amount * 2)
-        result_embed.add_field(name="💰 Статус", value=f"```ansi\n\u001b[1;32mПобеда! +{format_spaces(amount)} Колов\u001b[0m\n```", inline=False)
+        result_embed.add_field(name="💰 Статус", value=text_green(f"Победа! +{format_spaces(amount)} Колов"), inline=False)
     else: 
         result_embed.add_field(name="💰 Статус", value=text_red(f"Проигрыш: -{format_spaces(amount)} Колов"), inline=False)
         
@@ -830,8 +836,8 @@ async def roulette(interaction: discord.Interaction, amount: int):
     
     if not shot:
         update_coins(interaction.user.id, amount * 2)
-        result_embed.add_field(name="💀 Барабан", value=f"```ansi\n\u001b[1;32mПусто (Щелк)\u001b[0m\n```", inline=False)
-        result_embed.add_field(name="💰 Статус", value=f"```ansi\n\u001b[1;32mПобеда! +{format_spaces(amount)} Колов\u001b[0m\n```", inline=False)
+        result_embed.add_field(name="💀 Барабан", value=text_green("Пусто (Щелк)"), inline=False)
+        result_embed.add_field(name="💰 Статус", value=text_green(f"Победа! +{format_spaces(amount)} Колов"), inline=False)
     else:
         result_embed.add_field(name="💀 Барабан", value=text_red("Смертельный выстрел (БАХ)"), inline=False)
         result_embed.add_field(name="💰 Статус", value=text_red(f"Проигрыш: -{format_spaces(amount)} Колов"), inline=False)
@@ -1066,12 +1072,14 @@ class GuildModal(discord.ui.Modal):
             guilds_coll.update_one({"guild_name": self.guild_name}, {"$set": {"entry_fee": max(0, val_int)}})
             await interaction.response.send_message(f"✅ Цена входа установлена: {format_spaces(max(0, val_int))}.", ephemeral=True)
 
-class GuildJoinModal(discord.ui.Modal, title="Вступление в гильдию"):
-    guild_name_input = discord.ui.TextInput(label="Название гильдии", max_length=30)
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        target_name = self.guild_name_input.value.strip()
-        guild_data = guilds_coll.find_one({"guild_name": {"$regex": f"^{target_name}$", "$options": "i"}})
+class GuildJoinSelect(discord.ui.Select):
+    def __init__(self, guilds_list):
+        options = [discord.SelectOption(label=g["guild_name"], description=f"Казна: {format_spaces(g.get('bank', 0))} | Вход: {format_spaces(g.get('entry_fee', 0))}") for g in guilds_list[:25]]
+        super().__init__(placeholder="Выберите гильдию для вступления...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        target_name = self.values[0]
+        guild_data = guilds_coll.find_one({"guild_name": target_name})
         if not guild_data:
             return await interaction.response.send_message("❌ Гильдия не найдена!", ephemeral=True)
             
@@ -1089,6 +1097,11 @@ class GuildJoinModal(discord.ui.Modal, title="Вступление в гильд
             
         users_coll.update_one({"_id": interaction.user.id}, {"$set": {"guild_id": guild_data['guild_name']}})
         await interaction.response.send_message(f"✅ Вы успешно присоединились к гильдии **{guild_data['guild_name']}**!", ephemeral=True)
+
+class GuildJoinSelectView(discord.ui.View):
+    def __init__(self, guilds_list):
+        super().__init__(timeout=300)
+        self.add_item(GuildJoinSelect(guilds_list))
 
 class LeaderPanelView(discord.ui.View):
     def __init__(self, guild_name):
@@ -1132,7 +1145,10 @@ class GuildMainView(discord.ui.View):
 
     @discord.ui.button(label="Вступить", style=discord.ButtonStyle.blurple, emoji="🤝", row=1)
     async def join_guild(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(GuildJoinModal())
+        guilds_list = list(guilds_coll.find())
+        if not guilds_list:
+            return await interaction.response.send_message("❌ На сервере пока нет созданных гильдий.", ephemeral=True)
+        await interaction.response.send_message("🏰 Выберите гильдию из списка ниже:", view=GuildJoinSelectView(guilds_list), ephemeral=True)
         
     @discord.ui.button(label="Панель лидера", style=discord.ButtonStyle.grey, emoji="⚙️", row=1)
     async def leader_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1177,8 +1193,21 @@ async def guild_menu(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 # ==========================================
-# 8. АУКЦИОН РОЛЕЙ
+# 8. АУКЦИОН РОЛЕЙ И /SKALA
 # ==========================================
+SKALA_IMAGES = [
+    "https://media.tenor.com/images/3d941d8b9d031c6a6f1165a250320a0b/tenr.gif",
+    "https://i.pinimg.com/originals/8a/78/3f/8a783f9b2d8d8d3b28b7e7a8f9a2e3b5.jpg",
+    "https://media.giphy.com/media/26vhHx7T0qMrdQ2C4/giphy.gif"
+]
+
+@bot.tree.command(name="skala", description="Вызывает Скалу Джонсона")
+@check_maintenance()
+async def skala(interaction: discord.Interaction):
+    embed = discord.Embed(title="🗿 Скала Джонсон", color=0x2B2D31)
+    embed.set_image(url=random.choice(SKALA_IMAGES))
+    await interaction.response.send_message(embed=embed)
+
 class AuctionPagingView(discord.ui.View):
     def __init__(self, items):
         super().__init__(timeout=300)
