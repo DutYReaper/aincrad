@@ -8,6 +8,8 @@ import discord
 from pymongo import MongoClient
 from discord import app_commands
 from discord.ext import commands
+from PIL import Image
+from easy_pil import Editor, load_image_async, Font
 from keep_alive import keep_alive
 
 # ==========================================
@@ -187,11 +189,54 @@ async def on_member_join(member):
     welcome_channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
     if welcome_channel:
         content_msg = f"Добро пожаловать в **Айнкрад**, {member.mention}!"
-        embed = discord.Embed(color=0x2B2D31)
-        embed.set_author(name=f"Участник #{member.guild.member_count}", icon_url=member.display_avatar.url)
-        embed.set_image(url="https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExZWFmN3l4dDZleDhmdDJ0Y3MxcDlhMzB5cWs4dHgxM29na2Q2ZmQ0diZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/12wr8S2n5fL8lO/giphy.gif")
-        try: await welcome_channel.send(content=content_msg, embed=embed)
-        except Exception: pass
+        
+        try:
+            # Генерация приветственной карточки в стиле SAO / Sapphire
+            bg = Editor(Image.new("RGBA", (800, 300), (0, 0, 0, 0)))
+
+            # Создаем слоистые панели меню (эффект парящего интерфейса САО)
+            bg.rounded_rectangle((70, 20), 640, 250, radius=30, fill="#005bb5") # Темно-синяя тень сверху слева
+            bg.rounded_rectangle((130, 50), 640, 250, radius=30, fill="#00BFFF") # Ярко-голубая тень снизу справа
+            bg.rounded_rectangle((100, 35), 600, 250, radius=30, fill="#232428") # Основная темная панель карточки
+
+            # Верхняя плашка "Участник #..."
+            bg.rounded_rectangle((300, 50), 200, 30, radius=10, fill="#1E1F22")
+            font_small = Font.poppins(variant="bold", size=15)
+            bg.text((400, 65), f"Участник #{member.guild.member_count}", font=font_small, color="#FFFFFF", align="center")
+
+            # Загрузка и обрезка аватарки пользователя в круг
+            avatar_url = str(member.display_avatar.replace(size=128, format="png"))
+            avatar_image = await load_image_async(avatar_url)
+            avatar = Editor(avatar_image).resize((110, 110)).circle_image()
+
+            # Отрисовка белой обводки и вставка аватара
+            bg.ellipse((342, 92), width=116, height=116, outline="#FFFFFF", stroke_width=4)
+            bg.paste(avatar, (345, 95))
+
+            # Шрифты для главного текста
+            font_big = Font.poppins(variant="bold", size=32)
+            font_italic = Font.poppins(variant="italic", size=20)
+
+            # Защита от слишком длинных никнеймов, чтобы они не ломали верстку
+            display_name = member.name
+            if len(display_name) > 15:
+                display_name = display_name[:12] + "..."
+
+            # Отрисовка текста приветствия
+            bg.text((400, 230), f"Welcome {display_name}", font=font_big, color="#FFFFFF", align="center")
+            bg.text((400, 260), "to Aincrad", font=font_italic, color="#00BFFF", align="center")
+
+            # Отправка карточки
+            file = discord.File(fp=bg.image_bytes, filename="welcome_sao.png")
+            await welcome_channel.send(content=content_msg, file=file)
+            
+        except Exception as e:
+            print(f"Ошибка при генерации картинки: {e}")
+            # Резервный вариант, если вдруг картинка не сгенерируется
+            embed = discord.Embed(color=0x2B2D31)
+            embed.set_author(name=f"Участник #{member.guild.member_count}", icon_url=member.display_avatar.url)
+            try: await welcome_channel.send(content=content_msg, embed=embed)
+            except Exception: pass
 
 class MediaModerationView(discord.ui.View):
     def __init__(self, author_id, channel_id, content_text, files_data):
@@ -1127,8 +1172,7 @@ class GuildMainView(discord.ui.View):
 @check_maintenance()
 async def guild_menu(interaction: discord.Interaction):
     embed = discord.Embed(title="▬▬ ┌ 🏰 ГИЛЬДИИ АЙНКРАДА ┐ ▬▬", description="Используйте кнопки ниже для взаимодействия:", color=0x2B2D31)
-    # Generic SAO Theme Banner to match the screenshot layout
-    embed.set_image(url="https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExcDdwNWNmdnRyOGJlNW1kYmYzNm12N3Vyc3diaGlzZm92ajZnZ2F1YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XG444KXEaA3zW/giphy.gif")
+    embed.set_image(url="https://media.tenor.com/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
     await interaction.response.send_message(embed=embed, view=GuildMainView(interaction.user.id))
 
 # ==========================================
