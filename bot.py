@@ -205,8 +205,8 @@ async def on_member_join(member):
             bg.text((400, 65), f"Участник #{member.guild.member_count}", font=font_small, color="#FFFFFF", align="center")
 
             # Загрузка и обрезка аватарки пользователя в круг
-            avatar_url = str(member.display_avatar.replace(size=128, format="png"))
-            avatar_image = await load_image_async(avatar_url)
+            avatar_url = member.display_avatar.with_size(128).with_format("png").url
+            avatar_image = await load_image_async(str(avatar_url))
             avatar = Editor(avatar_image).resize((110, 110)).circle_image()
 
             # Отрисовка белой обводки и вставка аватара
