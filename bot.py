@@ -1290,9 +1290,9 @@ SKALA_IMAGES = [
 @bot.tree.command(name="skala", description="Вызывает Скалу Джонсона")
 @check_maintenance()
 async def skala(interaction: discord.Interaction):
-    embed = discord.Embed(title="🗿 Скала Джонсон", color=0x2B2D31)
-    embed.set_image(url=random.choice(SKALA_IMAGES))
-    await interaction.response.send_message(embed=embed)
+    gif_url = random.choice(SKALA_IMAGES)
+    # Отправляем гифку обычным текстом, чтобы Discord 100% развернул её сам
+    await interaction.response.send_message(content=f"🗿 **Скала Джонсон**\n{gif_url}")
 
 class AuctionPagingView(discord.ui.View):
     def __init__(self, items):
