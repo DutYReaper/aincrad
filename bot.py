@@ -1290,10 +1290,22 @@ SKALA_IMAGES = [
 @bot.tree.command(name="skala", description="Вызывает Скалу Джонсона")
 @check_maintenance()
 async def skala(interaction: discord.Interaction):
-    gif_url = random.choice(SKALA_IMAGES)
-    # Отправляем гифку обычным текстом, чтобы Discord 100% развернул её сам
-    await interaction.response.send_message(content=f"🗿 **Скала Джонсон**\n{gif_url}")
+    raw_url = random.choice(SKALA_IMAGES)
+    
+    # Превращаем ссылки-страницы Tenor в прямые ссылки на файл
+    # Пример: media1.tenor.com/m/ID/name.gif -> media.tenor.com/ID/tenor.gif
+    if "media1.tenor.com/m/" in raw_url:
+        parts = raw_url.split('/')
+        if len(parts) >= 6:
+            tenor_id = parts[4] # Вытаскиваем уникальный ID гифки
+            raw_url = f"https://media.tenor.com/{tenor_id}/tenor.gif"
 
+    # Теперь смело вставляем очищенную ссылку в красивый Embed
+    embed = discord.Embed(title="🗿 Скала Джонсон", color=0x2B2D31)
+    embed.set_image(url=raw_url)
+    
+    await interaction.response.send_message(embed=embed)
+    
 class AuctionPagingView(discord.ui.View):
     def __init__(self, items):
         super().__init__(timeout=300)
