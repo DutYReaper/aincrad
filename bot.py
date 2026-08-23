@@ -209,41 +209,14 @@ async def on_member_join(member):
     if welcome_channel:
         content_msg = f"Добро пожаловать в **Айнкрад**, {member.mention}!"
         
+        embed = discord.Embed(color=0x2B2D31)
+        embed.set_author(name=f"Участник #{member.guild.member_count}", icon_url=member.display_avatar.url)
+        embed.set_image(url="https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExZWFmN3l4dDZleDhmdDJ0Y3MxcDlhMzB5cWs4dHgxM29na2Q2ZmQ0diZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/12wr8S2n5fL8lO/giphy.gif")
+        
         try:
-            bg = Editor(Image.new("RGBA", (800, 300), (0, 0, 0, 0)))
-            bg.rounded_rectangle((70, 20), 640, 250, radius=30, fill="#005bb5")
-            bg.rounded_rectangle((130, 50), 640, 250, radius=30, fill="#00BFFF")
-            bg.rounded_rectangle((100, 35), 600, 250, radius=30, fill="#232428")
-            bg.rounded_rectangle((300, 50), 200, 30, radius=10, fill="#1E1F22")
-            font_small = Font.poppins(variant="bold", size=15)
-            bg.text((400, 65), f"Участник #{member.guild.member_count}", font=font_small, color="#FFFFFF", align="center")
-
-            avatar_url = member.display_avatar.with_size(128).with_format("png").url
-            avatar_image = await load_image_async(str(avatar_url))
-            avatar = Editor(avatar_image).resize((110, 110)).circle_image()
-
-            bg.ellipse((342, 92), width=116, height=116, outline="#FFFFFF", stroke_width=4)
-            bg.paste(avatar, (345, 95))
-
-            font_big = Font.poppins(variant="bold", size=32)
-            font_italic = Font.poppins(variant="italic", size=20)
-
-            display_name = member.name
-            if len(display_name) > 15:
-                display_name = display_name[:12] + "..."
-
-            bg.text((400, 230), f"Welcome {display_name}", font=font_big, color="#FFFFFF", align="center")
-            bg.text((400, 260), "to Aincrad", font=font_italic, color="#00BFFF", align="center")
-
-            file = discord.File(fp=bg.image_bytes, filename="welcome_sao.png")
-            await welcome_channel.send(content=content_msg, file=file)
-            
+            await welcome_channel.send(content=content_msg, embed=embed)
         except Exception as e:
-            print(f"Ошибка при генерации картинки: {e}")
-            embed = discord.Embed(color=0x2B2D31)
-            embed.set_author(name=f"Участник #{member.guild.member_count}", icon_url=member.display_avatar.url)
-            try: await welcome_channel.send(content=content_msg, embed=embed)
-            except Exception: pass
+            print(f"Ошибка при отправке приветствия: {e}")
 
 class MediaModerationView(discord.ui.View):
     def __init__(self, author_id, channel_id, content_text, files_data):
@@ -1196,9 +1169,122 @@ async def guild_menu(interaction: discord.Interaction):
 # 8. АУКЦИОН РОЛЕЙ И /SKALA
 # ==========================================
 SKALA_IMAGES = [
-    "https://media.tenor.com/images/3d941d8b9d031c6a6f1165a250320a0b/tenr.gif",
-    "https://i.pinimg.com/originals/8a/78/3f/8a783f9b2d8d8d3b28b7e7a8f9a2e3b5.jpg",
-    "https://media.giphy.com/media/26vhHx7T0qMrdQ2C4/giphy.gif"
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExaDZ4NW1kdGl5dDVvMXlta3lsb3FnbXEzOHQwNHFyOTYzajBsNGlrZSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/3oKIPjzfv0sI2p7fDW/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExaDZ4NW1kdGl5dDVvMXlta3lsb3FnbXEzOHQwNHFyOTYzajBsNGlrZSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/b1zAlqFj2fBi6pmzUJ/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExaDZ4NW1kdGl5dDVvMXlta3lsb3FnbXEzOHQwNHFyOTYzajBsNGlrZSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/KyDlrjmsJRCxFtFk51/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExaDZ4NW1kdGl5dDVvMXlta3lsb3FnbXEzOHQwNHFyOTYzajBsNGlrZSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/YG7kWyoHjsWd2/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExaDZ4NW1kdGl5dDVvMXlta3lsb3FnbXEzOHQwNHFyOTYzajBsNGlrZSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/2cdYfc9hMr9df6dS2s/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExaDZ4NW1kdGl5dDVvMXlta3lsb3FnbXEzOHQwNHFyOTYzajBsNGlrZSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/4g6xgP7FXjy12/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExaDZ4NW1kdGl5dDVvMXlta3lsb3FnbXEzOHQwNHFyOTYzajBsNGlrZSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/HbkT5F5CiRD3O/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExaDZ4NW1kdGl5dDVvMXlta3lsb3FnbXEzOHQwNHFyOTYzajBsNGlrZSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/ACZqfCpSGhG8h6HRV6/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExaDZ4NW1kdGl5dDVvMXlta3lsb3FnbXEzOHQwNHFyOTYzajBsNGlrZSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/N6Bn2tefKln8gzGtZ2/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3ODY5Y3BoYWo1dmhiOG1pZTJpaDhwcjNtdzBlOHNhb3EzcjdmNG96eSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/3oFzmpaysNiiLw6qK4/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3ODY5Y3BoYWo1dmhiOG1pZTJpaDhwcjNtdzBlOHNhb3EzcjdmNG96eSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/LXH6tT5Q6MDFBRjYaC/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3ODY5Y3BoYWo1dmhiOG1pZTJpaDhwcjNtdzBlOHNhb3EzcjdmNG96eSZlcD12MV9naWZzX3NlYXJjaCZjdD1n/WAFaNWJxlNCLSQXdlb/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3Nm55aGQ4ZnFnNWdxbGpvNDYzdG5vdGxidGsxOWN6b29qcGNpYTd0ayZlcD12MV9naWZzX3NlYXJjaCZjdD1n/XrBgtSNXQUFNu/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3Nm55aGQ4ZnFnNWdxbGpvNDYzdG5vdGxidGsxOWN6b29qcGNpYTd0ayZlcD12MV9naWZzX3NlYXJjaCZjdD1n/UtJtnnbCtJjSd0utDn/giphy.gif",
+    "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3dzhrcXJkeWVkOGk2d3VidnVpMGlqdmlxeGVwMWlhZzZ6cXc2dWdwNCZlcD12MV9naWZzX3NlYXJjaCZjdD1n/E4Pm5ySkkKfxOnbu1G/giphy.gif",
+    "https://media1.tenor.com/m/36_OCcDhS0cAAAAC/the-rock.gif",
+    "https://media1.tenor.com/m/prT_agJ7F98AAAAd/the-rock-the-rock-sus.gif",
+    "https://media1.tenor.com/m/RP_qoKH85xgAAAAd/the-rock-sus-the-rock-meme.gif",
+    "https://media1.tenor.com/m/4921KsgMSvkAAAAC/the-rock.gif",
+    "https://media1.tenor.com/m/FATkmhFxRfEAAAAd/the-rock-understands-the-rock.gif",
+    "https://media1.tenor.com/m/25xehLfWaHoAAAAd/the-rock.gif",
+    "https://media1.tenor.com/m/2AFDfNDHTbIAAAAd/the-rock-nod.gif",
+    "https://media1.tenor.com/m/XYqU2QyUx08AAAAC/not-funny-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/zu3wQZMQHWQAAAAd/dj.gif",
+    "https://media1.tenor.com/m/ZisvzS5S1HkAAAAd/the-rock-surprised.gif",
+    "https://media1.tenor.com/m/-Zm0agiEbP4AAAAd/thumbs-up-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/0ycp1t-un5oAAAAd/the-rock-surprised.gif",
+    "https://media1.tenor.com/m/RdnC6tbB3NgAAAAd/well-i-love-it-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/XYFkyIFjyAAAAAAd/rock-dance-rock-meme.gif",
+    "https://media1.tenor.com/m/xS6NLheqXZoAAAAd/the-rock-dancing.gif",
+    "https://media1.tenor.com/m/ZdzGt65qmx8AAAAd/%D1%81%D0%BA%D0%B0%D0%BB%D0%B0%D1%82%D0%B0%D0%BD%D1%86%D1%83%D0%B5%D1%82.gif",
+    "https://media1.tenor.com/m/Sjqj2-2D_hMAAAAd/tanngau.gif",
+    "https://media1.tenor.com/m/z8TZ77mvCDgAAAAC/the-rock-seagdps.gif",
+    "https://media1.tenor.com/m/Y2b7jWqgpvEAAAAd/the-rock.gif",
+    "https://media1.tenor.com/m/1YX8fuakXzAAAAAd/eyebrow-what.gif",
+    "https://media1.tenor.com/m/tRYzWuIeL24AAAAd/dwayne-johnson.gif",
+    "https://media1.tenor.com/m/FVuuqfuGeuYAAAAd/the-rock-wrestlemania-40.gif",
+    "https://media1.tenor.com/m/k2S3lN4kBYsAAAAC/the-rock-the-rock-sus.gif",
+    "https://media1.tenor.com/m/hx2WFTViHMUAAAAd/working-out-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/d5K71YktDB8AAAAC/yeah-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/eD80tpKfehAAAAAd/the-rock-the-rock-meme.gif",
+    "https://media1.tenor.com/m/yLIeWZwYM1gAAAAd/the-wok-the-rock.gif",
+    "https://media1.tenor.com/m/YHHjwSGwVd0AAAAd/the-rock-the-rock-reacts.gif",
+    "https://media1.tenor.com/m/FaG9mw1XmjwAAAAd/the-rock-the.gif",
+    "https://media1.tenor.com/m/TY2Lq1Er1GwAAAAd/the-rock.gif",
+    "https://media1.tenor.com/m/mOAOB7J0cWQAAAAd/homestuck-rock.gif",
+    "https://media1.tenor.com/m/UsW8jD3koVwAAAAd/the-rock-meme.gif",
+    "https://media1.tenor.com/m/vB0uTpxUpe4AAAAd/dwayne-johnson-explaining.gif",
+    "https://media1.tenor.com/m/UtwyT4tnPsIAAAAd/nod-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/Gh045anb9WYAAAAd/the-rock-nodding.gif",
+    "https://media1.tenor.com/m/BWoaaonWeZIAAAAd/rock-what.gif",
+    "https://media1.tenor.com/m/qTY-pJz8i2QAAAAd/shocked-oh-no.gif",
+    "https://media1.tenor.com/m/LwgbqDeSAPkAAAAd/dwyane-johnson-the-rock.gif",
+    "https://media1.tenor.com/m/B3eabMwcguEAAAAd/annoyed-i-cant-believe-it.gif",
+    "https://media1.tenor.com/m/0P7Gt3ZvkqUAAAAd/lifting-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/wrvwMhj84QQAAAAd/drinking-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/70dZ4jdByu4AAAAd/blow-kiss-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/jii_81stqDIAAAAd/%D1%81%D0%BA%D0%B0%D0%BB%D0%B0-%D1%81%D0%BA%D0%B0%D0%BB%D0%B0-%D0%B4%D0%B6%D0%BE%D0%BD%D1%81%D0%BE%D0%BD.gif",
+    "https://media1.tenor.com/m/Y2XCDE55FGAAAAAC/the-rock-raise-eyebrow.gif",
+    "https://media1.tenor.com/m/pcz8j_NXqVkAAAAC/rock-rock-johnson.gif",
+    "https://media1.tenor.com/m/RwfWwxpKH90AAAAd/smile-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/dDsTKD8ozYQAAAAd/say-what-whatever.gif",
+    "https://media1.tenor.com/m/tWKkNiIIRDcAAAAC/wink-smile.gif",
+    "https://media1.tenor.com/m/isds0pld-mEAAAAd/four-rock-gldfgf-four.gif",
+    "https://media1.tenor.com/m/l5tLCEdULmIAAAAd/im-coming-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/gHBcYHRee1QAAAAd/dwayne-the-rock-johnson-rock.gif",
+    "https://media1.tenor.com/m/ODnApU3icMMAAAAC/the-rock-njpw.gif",
+    "https://media1.tenor.com/m/lhJDKizBM8cAAAAd/looking-up-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/o7qBIl21In4AAAAC/sunglasses-off.gif",
+    "https://media1.tenor.com/m/vNyvxzUatE4AAAAd/pushups-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/EHxCyxGWdXsAAAAd/the-rock-ironic.gif",
+    "https://media1.tenor.com/m/a66D4GP4Vg8AAAAd/remove-sunglasses-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/atRPmHM-WSkAAAAd/im-proud-of-the-hard-work-you-put-in-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/Q3NvzwfusngAAAAC/therock.gif",
+    "https://media1.tenor.com/m/1avFsia-nv4AAAAd/raise-eyebrow-huh.gif",
+    "https://media1.tenor.com/m/_lrgPFxl0yoAAAAd/the-rock-cake.gif",
+    "https://media1.tenor.com/m/M6F5tAsvU5MAAAAC/rock-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/SCbnA9AM6pQAAAAC/the-rock-say-what.gif",
+    "https://media1.tenor.com/m/NMvVsicSz_cAAAAd/onenolesfan3-snap.gif",
+    "https://media1.tenor.com/m/7gE5SHl8U-AAAAAC/dwayne-johnson-the-rock.gif",
+    "https://media1.tenor.com/m/p3r4UO8FUScAAAAd/the-rock-golden-apple.gif",
+    "https://media1.tenor.com/m/u14Z6yqwnvgAAAAd/chest-press-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/ZZR1rbZ3hSgAAAAd/getting-dressed-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/nE4WQJSmQ20AAAAd/dwayne-johnson-the-rock.gif",
+    "https://media1.tenor.com/m/Hz4SypAyiFwAAAAd/dwayne-johnson-saturday-night-live.gif",
+    "https://media1.tenor.com/m/pUVvw2MsQdcAAAAd/rock-eyebrow-rock-fuck-off.gif",
+    "https://media1.tenor.com/m/pPSUJLjs_58AAAAd/yawn-tired.gif",
+    "https://media1.tenor.com/m/Lo1e8zRN6jsAAAAd/the-rock-wwe.gif",
+    "https://media1.tenor.com/m/Ux45v5nRAH4AAAAC/working-out-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/CZQxzBWG1i8AAAAd/the-rock-motivation.gif",
+    "https://media1.tenor.com/m/iU_-BMVz9BIAAAAd/im-proud-of-you-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/SOlMfaUZz08AAAAC/wwe-the-rock.gif",
+    "https://media1.tenor.com/m/PfOohdpwhJUAAAAd/the-rock-smile.gif",
+    "https://media1.tenor.com/m/nSj9dSflK0cAAAAd/the-rock-%D0%B1%D0%B5%D0%B7%D0%BD%D0%B5%D0%B3%D0%B0%D1%82%D0%B8%D0%B2%D1%87%D0%B8%D0%BA%D0%B0%D0%B3%D0%B0%D0%B9%D1%81.gif",
+    "https://media1.tenor.com/m/2zyP8qPQc2wAAAAd/have-a-great-summer-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/Pn6_Y6f7YFcAAAAd/exhausted-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/lrT6XcVZmrgAAAAC/the-rock-entrance.gif",
+    "https://media1.tenor.com/m/cllAhFhWZ9AAAAAd/i-love-you-guys-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/N6mU1vNAp44AAAAd/victory-fumigation-complete.gif",
+    "https://media1.tenor.com/m/WeeZAmE0g5wAAAAd/the-rock.gif",
+    "https://media1.tenor.com/m/yuXqeKuGg84AAAAd/pouring-water-on-head-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/SDDqs-k4izEAAAAd/workout-the-rock.gif",
+    "https://media1.tenor.com/m/Jdm7GGzzBuMAAAAd/wow-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/Up_tgrAlmjcAAAAd/margarita-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/R6wECy0niC8AAAAd/getting-a-tattoo-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/S2pq16ruFRYAAAAd/bench-press-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/zUkIAPgImacAAAAd/hiding-agent-john-hartley.gif",
+    "https://media1.tenor.com/m/B0HCOd346UUAAAAd/cheers-the-rock.gif",
+    "https://media1.tenor.com/m/O1TUZPHURDoAAAAd/not-pleased-arm-crossed.gif",
+    "https://media1.tenor.com/m/_LsyZ0mwn-QAAAAd/coffee-the-rock.gif",
+    "https://media1.tenor.com/m/-3uerd0wLxsAAAAC/awesome-the-rock.gif",
+    "https://media1.tenor.com/m/bQF64rtG9foAAAAd/oh-really-wide-eyes.gif",
+    "https://media1.tenor.com/m/NchadZ0U2ekAAAAC/the-rock-if-you-smell.gif",
+    "https://media1.tenor.com/m/f0zz0L4gO3cAAAAd/dwayne-the-rock-johnson-dwayne-johnson.gif",
+    "https://media1.tenor.com/m/lhMbtmV69jcAAAAC/pushups-intense.gif",
+    "https://media1.tenor.com/m/GwcYBCeVceAAAAAC/the-rock-making-faces.gif"
 ]
 
 @bot.tree.command(name="skala", description="Вызывает Скалу Джонсона")
