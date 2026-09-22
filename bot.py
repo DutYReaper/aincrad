@@ -67,6 +67,7 @@ AUTO_MOD_LOG_CHANNEL_ID = 1529472394102706336
 PUBLIC_IDEA_CHANNEL_ID = 1532592402223730739  
 ADMIN_IDEA_CHANNEL_ID = 1532719050319466610   
 DOCS_CHANNEL_ID = 1533682208487903483
+CHAT_CHANNEL_ID = 1529469957337780296
 
 # ❗ ЗАМЕНИ ЭТОТ ID НА СВОЙ КАНАЛ "ОБЩЕНИЕ" ДЛЯ УТРЕННИХ ПОЖЕЛАНИЙ ❗
 GENERAL_CHAT_ID = 1234567890123456789 
@@ -161,6 +162,9 @@ async def add_xp(interaction_or_member, user_id: int, amount: int):
 @bot.event
 async def on_ready():
     await bot.tree.sync()
+
+    daily_morning_vibe.start()
+    daily_evening_vibe.start()
     
     # Запускаем автоматические пожелания, если они еще не запущены
     if not daily_skala_wish.is_running():
@@ -1648,6 +1652,152 @@ async def test_wish(interaction: discord.Interaction):
     
     await interaction.response.send_message("✅ Отправляю тестовое пожелание в текущий канал...", ephemeral=True)
     await send_daily_wish(interaction.channel)
+    
+# ==========================================
+# АВТОРСКИЕ УТРЕННИЕ И ВЕЧЕРНИЕ ПОЖЕЛАНИЯ (СИСТЕМА ДНЕЙ)
+# ==========================================
+START_DATE_TIMESTAMP = 1725148800  # Базовая точка отсчета
+
+
+def get_current_day_number():
+  now = int(time.time())
+  return max(1, (now - START_DATE_TIMESTAMP) // 86400 + 1)
+
+
+MORNING_MASTERPIECES = [
+    (
+        "⚡ УТРЕННИЙ ПРОТОКОЛ АЙНКРАДА АКТИВИРОВАН!\n"
+        "Просыпаемся, элита! Желаю, чтобы этот день пробивал любые"
+        " резисты,\nпродуктивность летела в небеса, а на душе было абсолютное"
+        " чики-пуки.\nЗаряжаемся на победу, стей хард!"
+    ),
+    (
+        "🔥 СУТКИ ОБНОВИЛИСЬ, ПОЕХАЛИ!\n"
+        "Всем бодрейшего утра и бешеного заряда мотивации.\nПусть баги"
+        " обходят стороной, а каждый шаг приносит плюс к вашему"
+        " левелу.\nУлыбаемся чаще, мы тут историю пишем!"
+    ),
+    (
+        "🚀 ДОБРОЕ УТРО, НАШИ ЛЮДИ!\n"
+        "Включаем максимальный фокус и железную дисциплину.\nПусть удача"
+        " сегодня играет за вас, а настроение держится на отметке"
+        " «легендарно».\nПогнали покорять этот мир!"
+    ),
+]
+
+EVENING_MASTERPIECES = [
+    (
+        "🌙 НОЧНОЙ ДОЖОР И РЕФЛЕКСИЯ НА СВЯЗИ!\n"
+        "День подошел к концу. Если вы сегодня выложились на максимум — вы"
+        " красавцы.\nПереводим систему в спящий режим, набираемся сил перед"
+        " новым этажом.\nСладких снов, киберспортсмены!"
+    ),
+    (
+        "🌌 ВЕЧЕРНИЙ ВАЙБ В АЙНКРАДЕ...\n"
+        "Время выдохнуть, закрыть все вкладки с учебой и работой и расслабиться."
+        "\nВы отлично потрудились. Заслужили самый лучший отдых.\nСпокойной"
+        " ночи, банда!"
+    ),
+    (
+        "🛡️ КАРДИНАЛ ОБЪЯВЛЯЕТ КОМЕНДАНТСКИЙ ЧАС ДЛЯ ОТДЫХА!\n"
+        "Солнце садится, башни засыпают. Пусть вам приснятся эпические"
+        " победы.\nЗавтра продолжим этот путь. Всем уютной ночи!"
+    ),
+]
+
+
+# Функция отправки утреннего сообщения
+async def send_morning_vibe(target_channel):
+  day_num = get_current_day_number()
+  text = random.choice(MORNING_MASTERPIECES)
+  skala_gif = random.choice(SKALA_IMAGES)
+
+  if "media1.tenor.com/m/" in skala_gif:
+    parts = skala_gif.split("/")
+    if len(parts) >= 6:
+      skala_gif = f"https://media.tenor.com/{parts[4]}/tenor.gif"
+
+  message_content = f"**DAY {day_num}**\n\n{text}\n{skala_gif}"
+  await target_channel.send(message_content)
+
+
+# Функция отправки вечернего сообщения
+async def send_evening_vibe(target_channel):
+  day_num = get_current_day_number()
+  text = random.choice(EVENING_MASTERPIECES)
+  skala_gif = random.choice(SKALA_IMAGES)
+
+  if "media1.tenor.com/m/" in skala_gif:
+    parts = skala_gif.split("/")
+    if len(parts) >= 6:
+      skala_gif = f"https://media.tenor.com/{parts[4]}/tenor.gif"
+
+  message_content = f"**DAY {day_num} (EVENING)**\n\n{text}\n{skala_gif}"
+  await target_channel.send(message_content)
+
+
+# Фоновая задача на утро (07:00 Астана / 02:00 UTC)
+@tasks.loop(time=datetime.time(hour=2, minute=0, tzinfo=datetime.timezone.utc))
+async def daily_morning_vibe():
+  channel = bot.get_channel(CHAT_CHANNEL_ID)
+  if channel:
+    try:
+      await send_morning_vibe(channel)
+    except Exception as e:
+      print(f"Ошибка утренней рассылки: {e}")
+
+
+# Фоновая задача на вечер (21:00 Астана / 16:00 UTC)
+@tasks.loop(time=datetime.time(hour=16, minute=0, tzinfo=datetime.timezone.utc))
+async def daily_evening_vibe():
+  channel = bot.get_channel(CHAT_CHANNEL_ID)
+  if channel:
+    try:
+      await send_evening_vibe(channel)
+    except Exception as e:
+      print(f"Ошибка вечерней рассылки: {e}")
+
+
+@daily_morning_vibe.before_loop
+async def before_morning_vibe():
+  await bot.wait_until_ready()
+
+
+@daily_evening_vibe.before_loop
+async def before_evening_vibe():
+  await bot.wait_until_ready()
+
+
+# --- КОМАНДЫ ДЛЯ ТЕСТИРОВАНИЯ БЕЗ ОЖИДАНИЯ ---
+
+
+@bot.tree.command(
+    name="test_morning", description="[АДМИН] Тестовый запуск утреннего вайба"
+)
+async def test_morning(interaction: discord.Interaction):
+  if not is_admin_or_mod(interaction.user):
+    return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
+
+  await interaction.response.send_message(
+      "⚡ Тестируем утреннее сообщение...", ephemeral=True
+  )
+  channel = interaction.guild.get_channel(CHAT_CHANNEL_ID) or interaction.channel
+  await send_morning_vibe(channel)
+
+
+@bot.tree.command(
+    name="test_evening", description="[АДМИН] Тестовый запуск вечернего вайба"
+)
+async def test_evening(interaction: discord.Interaction):
+  if not is_admin_or_mod(interaction.user):
+    return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
+
+  await interaction.response.send_message(
+      "🌙 Тестируем вечернее сообщение...", ephemeral=True
+  )
+  channel = interaction.guild.get_channel(CHAT_CHANNEL_ID) or interaction.channel
+  await send_evening_vibe(channel)
+
 
 # Запуск
 if __name__ == "__main__":
