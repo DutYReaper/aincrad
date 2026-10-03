@@ -1576,7 +1576,7 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
             docs_embed.add_field(name="Выданный статус", value=gender, inline=True)
             docs_embed.add_field(name="Саппорт / Модер", value=interaction.user.mention, inline=False)
             docs_embed.add_field(name="Аккаунт создан", value=f"<t:{int(member.created_at.timestamp())}:F>", inline=False)
-            docs_embed.add_field(name="Discord Sensor", value=f"🔗 [Открыть профиль](https://discord.com/users/{member.id})", inline=False)
+            docs_embed.add_field(name="Discord Sensor", value=f"🔗 [Открыть профиль](https://discord-sensor.com/members/{member.id})", inline=False)
             docs_embed.set_thumbnail(url=member.display_avatar.url)
             await docs_channel.send(embed=docs_embed)
     except Exception: 
