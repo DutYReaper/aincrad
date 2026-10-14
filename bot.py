@@ -68,8 +68,6 @@ PUBLIC_IDEA_CHANNEL_ID = 1532592402223730739
 ADMIN_IDEA_CHANNEL_ID = 1532719050319466610   
 DOCS_CHANNEL_ID = 1533682208487903483
 CHAT_CHANNEL_ID = 1529469957337780296
-
-# ❗ ЗАМЕНИ ЭТОТ ID НА СВОЙ КАНАЛ "ОБЩЕНИЕ" ДЛЯ УТРЕННИХ ПОЖЕЛАНИЙ ❗
 GENERAL_CHAT_ID = 1234567890123456789 
 
 voice_start_times, voice_accumulated = {}, {}
@@ -177,7 +175,6 @@ class VerificationGenderSelect(discord.ui.View):
             
             await interaction.response.edit_message(content=f"✅ Игрок {self.target_member.mention} успешно верифицирован (Выдан статус: {gender})!", view=None, embed=None)
             
-            # Отправка лога в канал документов
             docs_channel = interaction.guild.get_channel(DOCS_CHANNEL_ID)
             if docs_channel:
                 docs_embed = discord.Embed(title="────── ┌ 📁 DOCC: ИДЕНТИФИКАЦИЯ ┐ ──────", color=0x2B2D31)
@@ -245,7 +242,7 @@ class VerifySystemView(discord.ui.View):
 # ==========================================
 @bot.event
 async def on_ready():
-    bot.add_view(VerifySystemView()) # Делаем кнопку верификации вечной
+    bot.add_view(VerifySystemView())
     await bot.tree.sync()
 
     daily_morning_vibe.start()
@@ -1386,7 +1383,6 @@ SKALA_IMAGES = [
 async def skala(interaction: discord.Interaction):
     raw_url = random.choice(SKALA_IMAGES)
     
-    # Превращаем ссылки-страницы Tenor в прямые ссылки на файл
     if "media1.tenor.com/m/" in raw_url:
         parts = raw_url.split('/')
         if len(parts) >= 6:
@@ -1558,7 +1554,7 @@ async def resetdb(interaction: discord.Interaction):
     await interaction.response.send_message("☢️ БД полностью очищена!", ephemeral=True)
 
 # ==========================================
-# 10. НОВОСТИ, СТРИМЫ, ИДЕИ, ВЕРИФИКАЦИЯ
+# 10. НОВОСТИ, СТРИМЫ, ИДЕИ, ВЕРИФИКАЦИЯ И СИСТЕМА СООБЩЕНИЙ
 # ==========================================
 class NewsModal(discord.ui.Modal, title="Новость"):
     news_title = discord.ui.TextInput(label="Заголовок")
@@ -1634,7 +1630,6 @@ async def setup_verify(interaction: discord.Interaction):
         
     embed = discord.Embed(title="🛡️ СИСТЕМА ИДЕНТИФИКАЦИИ ИГРОКОВ", description="Добро пожаловать в Айнкрад!\n\nЧтобы получить доступ к этажам сервера и начать игру, вам необходимо пройти быструю голосовую проверку.\n\n**Как получить доступ?**\n1️⃣ Зайдите в голосовой канал 🔊 **Ожидание верификации**.\n2️⃣ Дождитесь свободного Саппорта или Модератора.\n3️⃣ Вас перекинут в закрытый канал для короткой проверки.", color=0x3498DB)
     
-    # Добавлена интерактивная панель VerifySystemView!
     await interaction.channel.send(embed=embed, view=VerifySystemView())
     await interaction.response.send_message("✅ Система верификации успешно установлена.", ephemeral=True)
 
@@ -1666,19 +1661,15 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
             docs_embed.add_field(name="Выданный статус", value=gender, inline=True)
             docs_embed.add_field(name="Саппорт / Модер", value=interaction.user.mention, inline=False)
             docs_embed.add_field(name="Аккаунт создан", value=f"<t:{int(member.created_at.timestamp())}:F>", inline=False)
-            
-            # ИСПРАВЛЕНО НА DISCORD-SENSOR:
             docs_embed.add_field(name="Discord Sensor", value=f"🔗 [Открыть профиль](https://discord-sensor.com/members/{member.id})", inline=False)
-            
             docs_embed.set_thumbnail(url=member.display_avatar.url)
             await docs_channel.send(embed=docs_embed)
     except Exception: 
         await interaction.response.send_message("❌ Ошибка при выдаче роли.", ephemeral=True)
 
 # ==========================================
-# УНИВЕРСАЛЬНЫЙ СОЗДАТЕЛЬ СИСТЕМНЫХ СООБЩЕНИЙ
+# УНИВЕРСАЛЬНЫЙ СОЗДАТЕЛЬ СИСТЕМНЫХ СООБЩЕНИЙ (/sys_msg)
 # ==========================================
-
 class EmbedBuilderModal(discord.ui.Modal, title="Терминал создания Embed-сообщения"):
     embed_title = discord.ui.TextInput(
         label="Заголовок", 
@@ -1704,34 +1695,25 @@ class EmbedBuilderModal(discord.ui.Modal, title="Терминал создани
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        # 1. Обрабатываем цвет
         try: 
             color_int = int(self.embed_color.value.strip().replace("#", ""), 16)
         except Exception: 
             color_int = 0x2B2D31
 
-        # 2. Создаем эмбед
         embed = discord.Embed(
             title=self.embed_title.value.strip(), 
             description=self.embed_text.value.strip(), 
             color=color_int
         )
         
-        # 3. Безопасно очищаем и добавляем гифку
         image_url = self.embed_image.value.strip() if self.embed_image.value else ""
         if image_url:
-            # Убираем всё лишнее, если пользователь случайно захватил мусор
             if "http" in image_url:
                 clean_url = image_url.split("?")[0] if "?" in image_url and "cdn.discordapp.com" not in image_url else image_url
                 embed.set_image(url=clean_url)
 
-        # 4. Отправляем в канал
         await interaction.channel.send(embed=embed)
         await interaction.response.send_message("✅ Системное сообщение успешно отправлено!", ephemeral=True)
-
-@bot.tree.command(name="sys_msg", description="[АДМИН] Создать красивое информационное сообщение")
-async def sys_msg(interaction: discord.Interaction):
-    await interaction.response.send_modal(EmbedBuilderModal())
 
 @bot.tree.command(name="sys_msg", description="[АДМИН] Создать красивое информационное сообщение")
 async def sys_msg(interaction: discord.Interaction):
@@ -1751,138 +1733,86 @@ async def setup_ranks(interaction: discord.Interaction):
     await interaction.response.send_message("✅ Готово.", ephemeral=True)
     
 # ==========================================
-# АВТОРСКИЕ УТРЕННИЕ И ВЕЧЕРНИЕ ПОЖЕЛАНИЯ (ВАЙБ БРАТА)
+# АВТОРСКИЕ УТРЕННИЕ И ВЕЧЕРНИЕ ПОЖЕЛАНИЯ
 # ==========================================
-START_DATE_TIMESTAMP = 1725148800  # Базовая точка отсчета
-
+START_DATE_TIMESTAMP = 1725148800 
 
 def get_current_day_number():
-  now = int(time.time())
-  return max(1, (now - START_DATE_TIMESTAMP) // 86400 + 1)
-
+    now = int(time.time())
+    return max(1, (now - START_DATE_TIMESTAMP) // 86400 + 1)
 
 MORNING_MASTERPIECES = [
-    (
-        "ДОБРОЕ УТРОООО ВСЕМММММММММММММММММММММММММММММММММММММММ ЖЕЛАЮЮЮЮЮЮ"
-        " ВСЕМ ХОРОШЕГО ДНЯ И КРУТОГО НАСТРОЕНИЯЯЯЯЯЯ, ЧТОБЫ ВСЁ БЫЛО В ЖИЗНИ"
-        " ЧИКИ ПУКИ И ДУПЕР СУПЕР КРУТО)))"
-    ),
-    (
-        "ХАХАХАХАХАХА ДОБРОЕ УТРО ВСЕМ))) ЖЕЛАЮ НАИЛУЧШЕГО И ПОЗИТИВНОГО ДНЯ,"
-        " ЧТОБЫ ВЫ УЛЫБАЛИСЬ ПОЧАЩЕ И НАСТРОЕНИЕ БЫЛО ПРОСТО ПУШКА!"
-    ),
-    (
-        "ДОБРОЕ УТРО ВСЕМ, ЖЕЛАЮ ХОРОШЕГО, ПОЗИТИВНОГО И САМОГО КРУТОГО ДНЯ И"
-        " САМЫХ КРУТЫХ ЭМОЦИЙ (ХОРОШИХ))) СТЕЙ ХАРД ГАЙС!"
-    ),
+    ("ДОБРОЕ УТРОООО ВСЕМММММММММММММММММММММММММММММММММММММММ ЖЕЛАЮЮЮЮЮЮ ВСЕМ ХОРОШЕГО ДНЯ И КРУТОГО НАСТРОЕНИЯЯЯЯЯЯ, ЧТОБЫ ВСЁ БЫЛО В ЖИЗНИ ЧИКИ ПУКИ И ДУПЕР СУПЕР КРУТО)))"),
+    ("ХАХАХАХАХАХА ДОБРОЕ УТРО ВСЕМ))) ЖЕЛАЮ НАИЛУЧШЕГО И ПОЗИТИВНОГО ДНЯ, ЧТОБЫ ВЫ УЛЫБАЛИСЬ ПОЧАЩЕ И НАСТРОЕНИЕ БЫЛО ПРОСТО ПУШКА!"),
+    ("ДОБРОЕ УТРО ВСЕМ, ЖЕЛАЮ ХОРОШЕГО, ПОЗИТИВНОГО И САМОГО КРУТОГО ДНЯ И САМЫХ КРУТЫХ ЭМОЦИЙ (ХОРОШИХ))) СТЕЙ ХАРД ГАЙС!"),
 ]
 
 EVENING_MASTERPIECES = [
-    (
-        "ВСЕМ КРУТОГО ВЕЧЕРА))) НАДЕЮСЬ ВАШ ДЕНЬ ПРОШЕЛ АФИГЕННО И НА СТИЛЕ,"
-        " ОТДЫХАЙТЕ, ЗАСЛУЖИЛИ ПОЛНЫЙ РЕЛАКС!"
-    ),
-    (
-        "НОЧНОЙ ВАЙБ НА СВЯЗИ))) ВСЕМ САМОГО УЮТНОГО И КРУТОГО ВЕЧЕРА, ЗАКРЫВАЙТЕ"
-        " ВСЕ СВОИ ДЕЛА И ПОРА ЧИЛИТЬ!"
-    ),
-    (
-        "УЖЕ ВЕЧЕРЕТЬ НАЧАЛОСЬ, ЖЕЛАЮ ОТДОХНУТЬ НА ВСЕ СТО))) ЧТОБЫ НОЧЬ"
-        " ПРОШЛА СПОКОЙНО И СУПЕР ПОЗИТИВНО!"
-    ),
+    ("ВСЕМ КРУТОГО ВЕЧЕРА))) НАДЕЮСЬ ВАШ ДЕНЬ ПРОШЕЛ АФИГЕННО И НА СТИЛЕ, ОТДЫХАЙТЕ, ЗАСЛУЖИЛИ ПОЛНЫЙ РЕЛАКС!"),
+    ("НОЧНОЙ ВАЙБ НА СВЯЗИ))) ВСЕМ САМОГО УЮТНОГО И КРУТОГО ВЕЧЕРА, ЗАКРЫВАЙТЕ ВСЕ СВОИ ДЕЛА И ПОРА ЧИЛИТЬ!"),
+    ("УЖЕ ВЕЧЕРЕТЬ НАЧАЛОСЬ, ЖЕЛАЮ ОТДОХНУТЬ НА ВСЕ СТО))) ЧТОБЫ НОЧЬ ПРОШЛА СПОКОЙНО И СУПЕР ПОЗИТИВНО!"),
 ]
 
-
-# Функция отправки через Embed, чтобы убрать текст ссылки
 async def send_vibe_embed(target_channel, title_prefix, texts_list):
-  day_num = get_current_day_number()
-  text = random.choice(texts_list)
-  skala_gif = random.choice(SKALA_IMAGES)
+    day_num = get_current_day_number()
+    text = random.choice(texts_list)
+    skala_gif = random.choice(SKALA_IMAGES)
 
-  if "media1.tenor.com/m/" in skala_gif:
-    parts = skala_gif.split("/")
-    if len(parts) >= 6:
-      skala_gif = f"https://media.tenor.com/{parts[4]}/tenor.gif"
+    if "media1.tenor.com/m/" in skala_gif:
+        parts = skala_gif.split("/")
+        if len(parts) >= 6:
+            skala_gif = f"https://media.tenor.com/{parts[4]}/tenor.gif"
 
-  embed = discord.Embed(color=0x2B2D31)
-  embed.set_author(name=f"DAY {day_num} {title_prefix}")
-  embed.description = text
-  embed.set_image(url=skala_gif)
+    embed = discord.Embed(color=0x2B2D31)
+    embed.set_author(name=f"DAY {day_num} {title_prefix}")
+    embed.description = text
+    embed.set_image(url=skala_gif)
 
-  await target_channel.send(embed=embed)
+    await target_channel.send(embed=embed)
 
-
-# Функция для теста утра
 async def send_morning_vibe(target_channel):
-  await send_vibe_embed(target_channel, "", MORNING_MASTERPIECES)
+    await send_vibe_embed(target_channel, "", MORNING_MASTERPIECES)
 
-
-# Функция для теста вечера
 async def send_evening_vibe(target_channel):
-  await send_vibe_embed(target_channel, "(EVENING)", EVENING_MASTERPIECES)
+    await send_vibe_embed(target_channel, "(EVENING)", EVENING_MASTERPIECES)
 
-
-# Фоновая задача на утро (07:00 Астана / 02:00 UTC)
 @tasks.loop(time=datetime.time(hour=2, minute=0, tzinfo=datetime.timezone.utc))
 async def daily_morning_vibe():
-  channel = bot.get_channel(CHAT_CHANNEL_ID)
-  if channel:
-    try:
-      await send_morning_vibe(channel)
-    except Exception as e:
-      print(f"Ошибка утренней рассылки: {e}")
+    channel = bot.get_channel(CHAT_CHANNEL_ID)
+    if channel:
+        try: await send_morning_vibe(channel)
+        except Exception as e: print(f"Ошибка утренней рассылки: {e}")
 
-
-# Фоновая задача на вечер (21:00 Астана / 16:00 UTC)
 @tasks.loop(time=datetime.time(hour=16, minute=0, tzinfo=datetime.timezone.utc))
 async def daily_evening_vibe():
-  channel = bot.get_channel(CHAT_CHANNEL_ID)
-  if channel:
-    try:
-      await send_evening_vibe(channel)
-    except Exception as e:
-      print(f"Ошибка вечерней рассылки: {e}")
-
+    channel = bot.get_channel(CHAT_CHANNEL_ID)
+    if channel:
+        try: await send_evening_vibe(channel)
+        except Exception as e: print(f"Ошибка вечерней рассылки: {e}")
 
 @daily_morning_vibe.before_loop
 async def before_morning_vibe():
-  await bot.wait_until_ready()
-
+    await bot.wait_until_ready()
 
 @daily_evening_vibe.before_loop
 async def before_evening_vibe():
-  await bot.wait_until_ready()
+    await bot.wait_until_ready()
 
-
-# --- КОМАНДЫ ДЛЯ ТЕСТИРОВАНИЯ ---
-
-
-@bot.tree.command(
-    name="test_morning", description="[АДМИН] Тестовый запуск утреннего вайба"
-)
+@bot.tree.command(name="test_morning", description="[АДМИН] Тестовый запуск утреннего вайба")
 async def test_morning(interaction: discord.Interaction):
-  if not is_admin_or_mod(interaction.user):
-    return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
+    if not is_admin_or_mod(interaction.user):
+        return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
+    await interaction.response.send_message("⚡ Тестируем утреннее сообщение...", ephemeral=True)
+    channel = interaction.guild.get_channel(CHAT_CHANNEL_ID) or interaction.channel
+    await send_morning_vibe(channel)
 
-  await interaction.response.send_message(
-      "⚡ Тестируем утреннее сообщение...", ephemeral=True
-  )
-  channel = interaction.guild.get_channel(CHAT_CHANNEL_ID) or interaction.channel
-  await send_morning_vibe(channel)
-
-
-@bot.tree.command(
-    name="test_evening", description="[АДМИН] Тестовый запуск вечернего вайба"
-)
+@bot.tree.command(name="test_evening", description="[АДМИН] Тестовый запуск вечернего вайба")
 async def test_evening(interaction: discord.Interaction):
-  if not is_admin_or_mod(interaction.user):
-    return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
-
-  await interaction.response.send_message(
-      "🌙 Тестируем вечернее сообщение...", ephemeral=True
-  )
-  channel = interaction.guild.get_channel(CHAT_CHANNEL_ID) or interaction.channel
-  await send_evening_vibe(channel)
+    if not is_admin_or_mod(interaction.user):
+        return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
+    await interaction.response.send_message("🌙 Тестируем вечернее сообщение...", ephemeral=True)
+    channel = interaction.guild.get_channel(CHAT_CHANNEL_ID) or interaction.channel
+    await send_evening_vibe(channel)
 
 # Запуск
 if __name__ == "__main__":
