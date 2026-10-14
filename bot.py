@@ -1697,35 +1697,41 @@ class EmbedBuilderModal(discord.ui.Modal, title="Терминал создани
         max_length=6,
         default="2B2D31"
     )
-    # Вместо ссылки теперь просим имя файла, который ты закинешь вместе с командой
-    file_name = discord.ui.TextInput(
-        label="Имя файла гифки (например: sao.gif)", 
-        placeholder="sao.gif",
+    embed_image = discord.ui.TextInput(
+        label="Ссылка на GIF/Изображение", 
+        placeholder="Вставь прямую ссылку на gif",
         required=False
     )
 
     async def on_submit(self, interaction: discord.Interaction):
+        # 1. Обрабатываем цвет
         try: 
             color_int = int(self.embed_color.value.strip().replace("#", ""), 16)
         except Exception: 
             color_int = 0x2B2D31
 
+        # 2. Создаем эмбед
         embed = discord.Embed(
-            title=self.embed_title.value, 
-            description=self.embed_text.value, 
+            title=self.embed_title.value.strip(), 
+            description=self.embed_text.value.strip(), 
             color=color_int
         )
         
-        # Если указано имя файла, привязываем его как локальный ассет в эмбед
-        if self.file_name.value:
-            f_name = self.file_name.value.strip()
-            embed.set_image(url=f"attachment://{f_name}")
-            # Ищем файл в сообщении или отправляем вместе с эмбедом
-            # (Самый простой вариант — загружать гифку прямо в сообщении с ботом)
-            
-        await interaction.channel.send(embed=embed)
-        await interaction.response.send_message("✅ Готово!", ephemeral=True)
+        # 3. Безопасно очищаем и добавляем гифку
+        image_url = self.embed_image.value.strip() if self.embed_image.value else ""
+        if image_url:
+            # Убираем всё лишнее, если пользователь случайно захватил мусор
+            if "http" in image_url:
+                clean_url = image_url.split("?")[0] if "?" in image_url and "cdn.discordapp.com" not in image_url else image_url
+                embed.set_image(url=clean_url)
 
+        # 4. Отправляем в канал
+        await interaction.channel.send(embed=embed)
+        await interaction.response.send_message("✅ Системное сообщение успешно отправлено!", ephemeral=True)
+
+@bot.tree.command(name="sys_msg", description="[АДМИН] Создать красивое информационное сообщение")
+async def sys_msg(interaction: discord.Interaction):
+    await interaction.response.send_modal(EmbedBuilderModal())
 
 @bot.tree.command(name="sys_msg", description="[АДМИН] Создать красивое информационное сообщение")
 async def sys_msg(interaction: discord.Interaction):
