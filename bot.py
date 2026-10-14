@@ -157,10 +157,95 @@ async def add_xp(interaction_or_member, user_id: int, amount: int):
                 except Exception: pass
 
 # ==========================================
+# ИНТЕРАКТИВНАЯ СИСТЕМА ВЕРИФИКАЦИИ
+# ==========================================
+class VerificationGenderSelect(discord.ui.View):
+    def __init__(self, target_member: discord.Member):
+        super().__init__(timeout=300)
+        self.target_member = target_member
+
+    async def process_verification(self, interaction: discord.Interaction, gender: str):
+        role = discord.utils.get(interaction.guild.roles, name=gender)
+        if not role:
+            return await interaction.response.send_message(f"❌ Роль '{gender}' не найдена на сервере.", ephemeral=True)
+
+        try:
+            await self.target_member.add_roles(role)
+            unverify_role = discord.utils.get(interaction.guild.roles, name="unverify")
+            if unverify_role and unverify_role in self.target_member.roles:
+                await self.target_member.remove_roles(unverify_role)
+            
+            await interaction.response.edit_message(content=f"✅ Игрок {self.target_member.mention} успешно верифицирован (Выдан статус: {gender})!", view=None, embed=None)
+            
+            # Отправка лога в канал документов
+            docs_channel = interaction.guild.get_channel(DOCS_CHANNEL_ID)
+            if docs_channel:
+                docs_embed = discord.Embed(title="────── ┌ 📁 DOCC: ИДЕНТИФИКАЦИЯ ┐ ──────", color=0x2B2D31)
+                docs_embed.add_field(name="Пользователь", value=f"{self.target_member.mention}\n`{self.target_member.id}`", inline=True)
+                docs_embed.add_field(name="Выданный статус", value=gender, inline=True)
+                docs_embed.add_field(name="Саппорт / Модер", value=interaction.user.mention, inline=False)
+                docs_embed.add_field(name="Аккаунт создан", value=f"<t:{int(self.target_member.created_at.timestamp())}:F>", inline=False)
+                docs_embed.add_field(name="Discord Sensor", value=f"🔗 [Открыть профиль](https://discord-sensor.com/members/{self.target_member.id})", inline=False)
+                docs_embed.set_thumbnail(url=self.target_member.display_avatar.url)
+                await docs_channel.send(embed=docs_embed)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Ошибка при выдаче роли: {e}", ephemeral=True)
+
+    @discord.ui.button(label="♂️ Мужчина", style=discord.ButtonStyle.blurple)
+    async def male_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.process_verification(interaction, "♂️")
+
+    @discord.ui.button(label="♀️ Женщина", style=discord.ButtonStyle.red)
+    async def female_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.process_verification(interaction, "♀️")
+
+
+class UnverifyDropdown(discord.ui.Select):
+    def __init__(self, members):
+        options = [discord.SelectOption(label=m.display_name, description=f"ID: {m.id}", value=str(m.id)) for m in members[:25]]
+        super().__init__(placeholder="Выберите игрока для верификации...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        target_id = int(self.values[0])
+        target_member = interaction.guild.get_member(target_id)
+        if not target_member:
+            return await interaction.response.send_message("❌ Игрок не найден (возможно, он вышел с сервера).", ephemeral=True)
+
+        await interaction.response.edit_message(content=f"Выберите пол для игрока {target_member.mention}:", view=VerificationGenderSelect(target_member))
+
+
+class UnverifyDropdownView(discord.ui.View):
+    def __init__(self, members):
+        super().__init__(timeout=300)
+        self.add_item(UnverifyDropdown(members))
+
+
+class VerifySystemView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Панель верификации", style=discord.ButtonStyle.primary, emoji="📋", custom_id="verify_panel_btn")
+    async def open_verify_panel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin_or_mod(interaction.user):
+            return await interaction.response.send_message("❌ Этот интерфейс доступен только Саппортам и Модераторам!", ephemeral=True)
+
+        unverify_role = discord.utils.get(interaction.guild.roles, name="unverify")
+        if not unverify_role:
+            return await interaction.response.send_message("❌ Роль 'unverify' не найдена на сервере.", ephemeral=True)
+
+        unverified_members = [m for m in interaction.guild.members if unverify_role in m.roles]
+        if not unverified_members:
+            return await interaction.response.send_message("✅ В данный момент нет игроков, ожидающих верификацию.", ephemeral=True)
+
+        await interaction.response.send_message("👥 Список игроков с ролью `unverify`:", view=UnverifyDropdownView(unverified_members), ephemeral=True)
+
+
+# ==========================================
 # 3. ИВЕНТЫ (АВТОМОД, ВОЙС, ПРИВЕТСТВИЕ)
 # ==========================================
 @bot.event
 async def on_ready():
+    bot.add_view(VerifySystemView()) # Делаем кнопку верификации вечной
     await bot.tree.sync()
 
     daily_morning_vibe.start()
@@ -1546,20 +1631,22 @@ async def idea(interaction: discord.Interaction):
 async def setup_verify(interaction: discord.Interaction):
     if not is_admin_or_mod(interaction.user): 
         return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
-    embed = discord.Embed(title="🛡️ ИДЕНТИФИКАЦИЯ", description="Зайдите в войс Ожидание верификации...", color=0x3498DB)
-    embed.set_image(url="https://media.tenor.com/zLQ4_cEQY0AAAAAC/sao.gif")
-    await interaction.channel.send(embed=embed)
-    await interaction.response.send_message("✅ Установлено.", ephemeral=True)
+        
+    embed = discord.Embed(title="🛡️ СИСТЕМА ИДЕНТИФИКАЦИИ ИГРОКОВ", description="Добро пожаловать в Айнкрад!\n\nЧтобы получить доступ к этажам сервера и начать игру, вам необходимо пройти быструю голосовую проверку.\n\n**Как получить доступ?**\n1️⃣ Зайдите в голосовой канал 🔊 **Ожидание верификации**.\n2️⃣ Дождитесь свободного Саппорта или Модератора.\n3️⃣ Вас перекинут в закрытый канал для короткой проверки.", color=0x3498DB)
+    
+    # Добавлена интерактивная панель VerifySystemView!
+    await interaction.channel.send(embed=embed, view=VerifySystemView())
+    await interaction.response.send_message("✅ Система верификации успешно установлена.", ephemeral=True)
 
 @bot.tree.command(name="verify", description="[САППОРТ] Проверить игрока")
-@app_commands.choices(gender=[app_commands.Choice(name="Мужчина", value="♂️"), app_commands.Choice(name="Женщина", value="♀️")])
+@app_commands.choices(gender=[app_commands.Choice(name="♂️", value="♂️"), app_commands.Choice(name="♀️", value="♀️")])
 async def verify_user(interaction: discord.Interaction, member: discord.Member, gender: str):
     if not is_admin_or_mod(interaction.user): 
         return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
         
     role = discord.utils.get(interaction.guild.roles, name=gender)
     if not role: 
-        return await interaction.response.send_message("❌ Роль не найдена.", ephemeral=True)
+        return await interaction.response.send_message(f"❌ Роль '{gender}' не найдена.", ephemeral=True)
     
     try:
         await member.add_roles(role)
@@ -1576,7 +1663,10 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
             docs_embed.add_field(name="Выданный статус", value=gender, inline=True)
             docs_embed.add_field(name="Саппорт / Модер", value=interaction.user.mention, inline=False)
             docs_embed.add_field(name="Аккаунт создан", value=f"<t:{int(member.created_at.timestamp())}:F>", inline=False)
+            
+            # ИСПРАВЛЕНО НА DISCORD-SENSOR:
             docs_embed.add_field(name="Discord Sensor", value=f"🔗 [Открыть профиль](https://discord-sensor.com/members/{member.id})", inline=False)
+            
             docs_embed.set_thumbnail(url=member.display_avatar.url)
             await docs_channel.send(embed=docs_embed)
     except Exception: 
