@@ -193,11 +193,11 @@ class VerificationGenderSelect(discord.ui.View):
 
     @discord.ui.button(label="Мужчина", emoji="♂️", style=discord.ButtonStyle.blurple)
     async def male_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_verification(interaction, "♂️ Мужчина")
+        await self.process_verification(interaction, "♂️")
 
     @discord.ui.button(label="Женщина", emoji="♀️", style=discord.ButtonStyle.red)
     async def female_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_verification(interaction, "♀️ Женщина")
+        await self.process_verification(interaction, "♀️")
 
 
 class UnverifyDropdown(discord.ui.Select):
@@ -1640,8 +1640,8 @@ async def setup_verify(interaction: discord.Interaction):
 
 @bot.tree.command(name="verify", description="[САППОРТ] Проверить игрока")
 @app_commands.choices(gender=[
-    app_commands.Choice(name="♂️ Мужчина", value="♂️ Мужчина"), 
-    app_commands.Choice(name="♀️ Женщина", value="♀️ Женщина")
+    app_commands.Choice(name="♂️ Мужчина", value="♂️"), 
+    app_commands.Choice(name="♀️ Женщина", value="♀️")
 ])
 async def verify_user(interaction: discord.Interaction, member: discord.Member, gender: str):
     if not is_admin_or_mod(interaction.user): 
