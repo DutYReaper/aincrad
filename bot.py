@@ -53,7 +53,7 @@ intents.message_content = True
 intents.members = True
 intents.voice_states = True 
 
-bot = commands.Bot(command_prefix="!", intents=intents, chunk_guilds_at_startup=False, max_messages=10)
+bot = commands.Bot(command_prefix="!", intents=intents, chunk_guilds_at_startup=True, max_messages=10)
 
 MAINTENANCE_MODE = False
 
@@ -191,13 +191,13 @@ class VerificationGenderSelect(discord.ui.View):
         except Exception as e:
             await interaction.response.send_message(f"❌ Ошибка при выдаче роли: {e}", ephemeral=True)
 
-    @discord.ui.button(label="♂️ Мужчина", style=discord.ButtonStyle.blurple)
+    @discord.ui.button(label="Мужчина", emoji="♂️", style=discord.ButtonStyle.blurple)
     async def male_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_verification(interaction, "♂️")
+        await self.process_verification(interaction, "♂️ Мужчина")
 
-    @discord.ui.button(label="♀️ Женщина", style=discord.ButtonStyle.red)
+    @discord.ui.button(label="Женщина", emoji="♀️", style=discord.ButtonStyle.red)
     async def female_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_verification(interaction, "♀️")
+        await self.process_verification(interaction, "♀️ Женщина")
 
 
 class UnverifyDropdown(discord.ui.Select):
@@ -233,7 +233,7 @@ class VerifySystemView(discord.ui.View):
         if not unverify_role:
             return await interaction.response.send_message("❌ Роль 'unverify' не найдена на сервере.", ephemeral=True)
 
-        unverified_members = [m for m in interaction.guild.members if unverify_role in m.roles]
+        unverified_members = unverify_role.members
         if not unverified_members:
             return await interaction.response.send_message("✅ В данный момент нет игроков, ожидающих верификацию.", ephemeral=True)
 
@@ -1639,7 +1639,10 @@ async def setup_verify(interaction: discord.Interaction):
     await interaction.response.send_message("✅ Система верификации успешно установлена.", ephemeral=True)
 
 @bot.tree.command(name="verify", description="[САППОРТ] Проверить игрока")
-@app_commands.choices(gender=[app_commands.Choice(name="♂️", value="♂️"), app_commands.Choice(name="♀️", value="♀️")])
+@app_commands.choices(gender=[
+    app_commands.Choice(name="♂️ Мужчина", value="♂️ Мужчина"), 
+    app_commands.Choice(name="♀️ Женщина", value="♀️ Женщина")
+])
 async def verify_user(interaction: discord.Interaction, member: discord.Member, gender: str):
     if not is_admin_or_mod(interaction.user): 
         return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
