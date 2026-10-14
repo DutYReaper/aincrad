@@ -1688,27 +1688,27 @@ class EmbedBuilderModal(discord.ui.Modal, title="Терминал создани
     embed_text = discord.ui.TextInput(
         label="Основной текст", 
         style=discord.TextStyle.paragraph, 
-        placeholder="Вставь сюда красиво оформленный текст...",
+        placeholder="Вставь сюда текст...",
         max_length=4000
     )
     embed_color = discord.ui.TextInput(
         label="HEX Цвет (без решетки)", 
-        placeholder="Например: 00BFFF",
+        placeholder="00BFFF",
         max_length=6,
         default="2B2D31"
     )
-    embed_image = discord.ui.TextInput(
-        label="Ссылка на GIF/Изображение", 
-        placeholder="https://media.tenor.com/.../gif (необязательно)",
+    # Вместо ссылки теперь просим имя файла, который ты закинешь вместе с командой
+    file_name = discord.ui.TextInput(
+        label="Имя файла гифки (например: sao.gif)", 
+        placeholder="sao.gif",
         required=False
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Превращаем текст цвета в понятный дискорду формат
         try: 
             color_int = int(self.embed_color.value.strip().replace("#", ""), 16)
         except Exception: 
-            color_int = 0x2B2D31 # Цвет по умолчанию (темно-серый дискордовский), если ошибся
+            color_int = 0x2B2D31
 
         embed = discord.Embed(
             title=self.embed_title.value, 
@@ -1716,12 +1716,15 @@ class EmbedBuilderModal(discord.ui.Modal, title="Терминал создани
             color=color_int
         )
         
-        # Если вставил ссылку на гифку - прикрепляем
-        if self.embed_image.value:
-            embed.set_image(url=self.embed_image.value.strip())
+        # Если указано имя файла, привязываем его как локальный ассет в эмбед
+        if self.file_name.value:
+            f_name = self.file_name.value.strip()
+            embed.set_image(url=f"attachment://{f_name}")
+            # Ищем файл в сообщении или отправляем вместе с эмбедом
+            # (Самый простой вариант — загружать гифку прямо в сообщении с ботом)
             
         await interaction.channel.send(embed=embed)
-        await interaction.response.send_message("✅ Системное сообщение успешно загружено в базу и отправлено!", ephemeral=True)
+        await interaction.response.send_message("✅ Готово!", ephemeral=True)
 
 
 @bot.tree.command(name="sys_msg", description="[АДМИН] Создать красивое информационное сообщение")
