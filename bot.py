@@ -1675,6 +1675,63 @@ async def verify_user(interaction: discord.Interaction, member: discord.Member, 
     except Exception: 
         await interaction.response.send_message("❌ Ошибка при выдаче роли.", ephemeral=True)
 
+# ==========================================
+# УНИВЕРСАЛЬНЫЙ СОЗДАТЕЛЬ СИСТЕМНЫХ СООБЩЕНИЙ
+# ==========================================
+
+class EmbedBuilderModal(discord.ui.Modal, title="Терминал создания Embed-сообщения"):
+    embed_title = discord.ui.TextInput(
+        label="Заголовок", 
+        placeholder="Например: 🗺️ Навигация по Айнкраду",
+        max_length=256
+    )
+    embed_text = discord.ui.TextInput(
+        label="Основной текст", 
+        style=discord.TextStyle.paragraph, 
+        placeholder="Вставь сюда красиво оформленный текст...",
+        max_length=4000
+    )
+    embed_color = discord.ui.TextInput(
+        label="HEX Цвет (без решетки)", 
+        placeholder="Например: 00BFFF",
+        max_length=6,
+        default="2B2D31"
+    )
+    embed_image = discord.ui.TextInput(
+        label="Ссылка на GIF/Изображение", 
+        placeholder="https://media.tenor.com/.../gif (необязательно)",
+        required=False
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Превращаем текст цвета в понятный дискорду формат
+        try: 
+            color_int = int(self.embed_color.value.strip().replace("#", ""), 16)
+        except Exception: 
+            color_int = 0x2B2D31 # Цвет по умолчанию (темно-серый дискордовский), если ошибся
+
+        embed = discord.Embed(
+            title=self.embed_title.value, 
+            description=self.embed_text.value, 
+            color=color_int
+        )
+        
+        # Если вставил ссылку на гифку - прикрепляем
+        if self.embed_image.value:
+            embed.set_image(url=self.embed_image.value.strip())
+            
+        await interaction.channel.send(embed=embed)
+        await interaction.response.send_message("✅ Системное сообщение успешно загружено в базу и отправлено!", ephemeral=True)
+
+
+@bot.tree.command(name="sys_msg", description="[АДМИН] Создать красивое информационное сообщение")
+async def sys_msg(interaction: discord.Interaction):
+    if not is_admin_or_mod(interaction.user): 
+        return await interaction.response.send_message("❌ Ошибка доступа. Требуются права Кардинала.", ephemeral=True)
+        
+    await interaction.response.send_modal(EmbedBuilderModal())
+
+
 @bot.tree.command(name="setup_ranks", description="[АДМИН] Ранги инфо")
 async def setup_ranks(interaction: discord.Interaction):
     if not is_admin_or_mod(interaction.user): 
