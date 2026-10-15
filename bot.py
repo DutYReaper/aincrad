@@ -59,7 +59,14 @@ MAINTENANCE_MODE = False
 
 # Константы каналов
 WELCOME_CHANNEL_ID = 1529471897647976648
-MEDIA_CHANNELS = [1534785295696789634, 1534785127572443246, 1534550233315414169]
+MEDIA_CHANNELS = [
+    1534785295696789634, 
+    1534785127572443246, 
+    1534550233315414169, # фотос
+    1530041507434860595, # клипчанские Valorant
+    1530041580478529556, # клипчанские CS2
+    1533786029025398864  # клипчанские Dota 2
+]
 VIDEO_CHANNEL_ID = 1529472211730043012
 MEDIA_LOG_CHANNEL_ID = 1534789085582065794
 STREAM_CHANNEL_ID = 1534785474739179530
@@ -409,15 +416,29 @@ async def on_message(message):
         if message.attachments or message.embeds or "http" in content_lower or ".gif" in content_lower:
             try:
                 mod_channel = bot.get_channel(MEDIA_LOG_CHANNEL_ID)
+                # Скачиваем файл в память бота
                 files_data = [{"bytes": await attachment.read(), "filename": attachment.filename} for attachment in message.attachments]
-                embed = discord.Embed(title="🔍 ПРЕМОДЕРАЦИЯ КОНТЕНТА", description=f"**Автор:** {message.author.mention}\n**Канал:** {message.channel.mention}", color=0xF1C40F)
-                if message.content: embed.add_field(name="Текст", value=text_blue(message.content), inline=False)
-                if message.attachments: embed.set_image(url=message.attachments[0].url)
-                elif message.embeds and message.embeds[0].image: embed.set_image(url=message.embeds[0].image.url)
                 
-                await mod_channel.send(embed=embed, view=MediaModerationView(message.author.id, message.channel.id, message.content, files_data))
+                embed = discord.Embed(title="🔍 ПРЕМОДЕРАЦИЯ КОНТЕНТА", description=f"**Автор:** {message.author.mention}\n**Канал:** {message.channel.mention}", color=0xF1C40F)
+                if message.content: 
+                    embed.add_field(name="Текст", value=text_blue(message.content), inline=False)
+                
+                # Превращаем скачанные байты в файлы Дискорда для отправки в админ-канал
+                discord_files = [discord.File(io.BytesIO(fd["bytes"]), filename=fd["filename"]) for fd in files_data]
+                
+                # Если это картинка, красиво вшиваем её прямо в Embed
+                if discord_files:
+                    filename = discord_files[0].filename.lower()
+                    if filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+                        embed.set_image(url=f"attachment://{discord_files[0].filename}")
+                elif message.embeds and message.embeds[0].image: 
+                    embed.set_image(url=message.embeds[0].image.url)
+
+                # Отправляем сообщение С ПРИКРЕПЛЕННЫМИ ФАЙЛАМИ
+                await mod_channel.send(embed=embed, files=discord_files, view=MediaModerationView(message.author.id, message.channel.id, message.content, files_data))
                 await message.delete()
-            except Exception: pass
+            except Exception as e: 
+                print(f"Ошибка премодерации: {e}")
             return
 
     await add_xp(message, message.author.id, random.randint(2, 5))
