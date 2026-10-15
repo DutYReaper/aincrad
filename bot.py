@@ -348,7 +348,7 @@ class MediaModerationView(discord.ui.View):
             content = f"**Отправил:** <@{self.author_id}>\n\n{self.content_text}" if self.content_text else f"**Отправил:** <@{self.author_id}>"
             
             msg = await webhook.send(content=content, files=files, username="Yui", avatar_url=bot.user.display_avatar.url, wait=True)
-            try: await msg.add_reaction("❤️")
+            try: await msg.add_reaction("💎")
             except Exception: pass
 
             # Финал
