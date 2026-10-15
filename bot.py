@@ -317,47 +317,70 @@ async def on_member_join(member):
             print(f"Ошибка при отправке приветствия: {e}")
 
 class MediaModerationView(discord.ui.View):
-    def __init__(self, author_id, channel_id, content_text, files_data):
+    # Теперь мы НЕ передаем сюда тяжелые файлы (files_data убрано)
+    def __init__(self, author_id, channel_id, content_text):
         super().__init__(timeout=None)
         self.author_id = author_id
         self.channel_id = channel_id
         self.content_text = content_text
-        self.files_data = files_data
 
     @discord.ui.button(label="Принять", style=discord.ButtonStyle.green, emoji="✅")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_admin_or_mod(interaction.user): 
             return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
             
-        channel = interaction.guild.get_channel(self.channel_id)
-        webhooks = await channel.webhooks()
-        webhook = discord.utils.get(webhooks, name="Yui Media") or await channel.create_webhook(name="Yui Media")
-        
-        files = [discord.File(io.BytesIO(file_data["bytes"]), filename=file_data["filename"]) for file_data in self.files_data]
-        content = f"**Отправил:** <@{self.author_id}>\n\n{self.content_text}" if self.content_text else f"**Отправил:** <@{self.author_id}>"
-        
-        msg = await webhook.send(content=content, files=files, username="Yui", avatar_url=bot.user.display_avatar.url, wait=True)
-        try: await msg.add_reaction("❤️")
-        except Exception: pass
-
-        embed = interaction.message.embeds[0]
-        embed.color = 0x2ECC71
-        embed.title = "✅ КОНТЕНТ ОДОБРЕН И ОПУБЛИКОВАН"
-        embed.add_field(name="Одобрил", value=interaction.user.mention, inline=False)
+        # Блокируем кнопки
         for child in self.children: child.disabled = True
+        embed = interaction.message.embeds[0]
+        embed.color = 0xF39C12
+        embed.title = "⏳ ФАЙЛ ПЕРЕСЫЛАЕТСЯ В КАНАЛ..."
         await interaction.response.edit_message(embed=embed, view=self)
-        await add_xp(interaction, self.author_id, random.randint(2, 5))
+        
+        try:
+            channel = interaction.guild.get_channel(self.channel_id)
+            webhooks = await channel.webhooks()
+            webhook = discord.utils.get(webhooks, name="Yui Media") or await channel.create_webhook(name="Yui Media")
+            
+            # 🔥 МАГИЯ ЗДЕСЬ: Бот берет вложения прямо из сообщения, под которым ты нажал кнопку!
+            # Ему больше не нужно держать их в памяти часами.
+            files = [await attachment.to_file() for attachment in interaction.message.attachments]
+            
+            content = f"**Отправил:** <@{self.author_id}>\n\n{self.content_text}" if self.content_text else f"**Отправил:** <@{self.author_id}>"
+            
+            msg = await webhook.send(content=content, files=files, username="Yui", avatar_url=bot.user.display_avatar.url, wait=True)
+            try: await msg.add_reaction("❤️")
+            except Exception: pass
+
+            # Финал
+            embed.color = 0x2ECC71
+            embed.title = "✅ КОНТЕНТ ОДОБРЕН И ОПУБЛИКОВАН"
+            embed.add_field(name="Одобрил", value=interaction.user.mention, inline=False)
+            # Если это была просто картинка из ссылки в тексте, перенесем её
+            if not interaction.message.attachments and embed.image:
+                pass # Картинка уже в эмбеде
+            elif interaction.message.attachments:
+                # Очищаем эмбед от локального изображения, так как файл уже отправлен
+                embed.set_image(url=None)
+                
+            await interaction.message.edit(embed=embed, view=self, attachments=interaction.message.attachments)
+            await add_xp(interaction, self.author_id, random.randint(2, 5))
+            
+        except Exception as e:
+            embed.color = 0xE74C3C
+            embed.title = "❌ ОШИБКА ПУБЛИКАЦИИ"
+            embed.add_field(name="Ошибка", value=str(e), inline=False)
+            await interaction.message.edit(embed=embed, view=self)
 
     @discord.ui.button(label="Отклонить", style=discord.ButtonStyle.red, emoji="❌")
     async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_admin_or_mod(interaction.user): 
             return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
             
+        for child in self.children: child.disabled = True
         embed = interaction.message.embeds[0]
         embed.color = 0xE74C3C
         embed.title = "❌ КОНТЕНТ ОТКЛОНЕН"
         embed.add_field(name="Отклонил", value=interaction.user.mention, inline=False)
-        for child in self.children: child.disabled = True
         await interaction.response.edit_message(embed=embed, view=self)
 
 @bot.event
@@ -416,26 +439,20 @@ async def on_message(message):
         if message.attachments or message.embeds or "http" in content_lower or ".gif" in content_lower:
             try:
                 mod_channel = bot.get_channel(MEDIA_LOG_CHANNEL_ID)
-                # Скачиваем файл в память бота
-                files_data = [{"bytes": await attachment.read(), "filename": attachment.filename} for attachment in message.attachments]
+                
+                # Скачиваем файлы ровно один раз для отправки в скрытый канал админов
+                discord_files = [await attachment.to_file() for attachment in message.attachments]
                 
                 embed = discord.Embed(title="🔍 ПРЕМОДЕРАЦИЯ КОНТЕНТА", description=f"**Автор:** {message.author.mention}\n**Канал:** {message.channel.mention}", color=0xF1C40F)
                 if message.content: 
                     embed.add_field(name="Текст", value=text_blue(message.content), inline=False)
                 
-                # Превращаем скачанные байты в файлы Дискорда для отправки в админ-канал
-                discord_files = [discord.File(io.BytesIO(fd["bytes"]), filename=fd["filename"]) for fd in files_data]
-                
-                # Если это картинка, красиво вшиваем её прямо в Embed
-                if discord_files:
-                    filename = discord_files[0].filename.lower()
-                    if filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
-                        embed.set_image(url=f"attachment://{discord_files[0].filename}")
-                elif message.embeds and message.embeds[0].image: 
+                # Если в сообщении была ссылка на гифку/картинку, а не файл
+                if not message.attachments and message.embeds and message.embeds[0].image: 
                     embed.set_image(url=message.embeds[0].image.url)
 
-                # Отправляем сообщение С ПРИКРЕПЛЕННЫМИ ФАЙЛАМИ
-                await mod_channel.send(embed=embed, files=discord_files, view=MediaModerationView(message.author.id, message.channel.id, message.content, files_data))
+                # Отправляем в админ-канал, передаем в View ТОЛЬКО текст и ID (никаких тяжелых файлов!)
+                await mod_channel.send(embed=embed, files=discord_files, view=MediaModerationView(message.author.id, message.channel.id, message.content))
                 await message.delete()
             except Exception as e: 
                 print(f"Ошибка премодерации: {e}")
