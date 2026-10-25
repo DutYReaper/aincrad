@@ -6,7 +6,11 @@ import time
 import asyncio
 import datetime
 import discord
-import google.generativeai as genai
+import os
+from google import genai
+
+# Создаем клиент новой версии API
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 from pymongo import MongoClient
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -1796,10 +1800,12 @@ async def generate_vibe_text(time_of_day: str) -> str:
         "Пиши без приветствий от лица ИИ, выдавай только сам текст сообщения. Максимум 2-3 предложения."
     )
     try:
-        response = await ai_model.generate_content_async(prompt)
+        response = await client.aio.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt
+        )
         return response.text.strip()
     except Exception as e:
-        # Выводим полную техническую ошибку от Google прямо в чат
         return f"🚨 ОШИБКА GOOGLE API: ```{str(e)}```"
 
 async def send_vibe_embed(target_channel, title_prefix, time_of_day):
