@@ -1776,8 +1776,8 @@ async def setup_ranks(interaction: discord.Interaction):
 # ==========================================
 
 # Настраиваем нейросеть
-#genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-#ai_model = genai.GenerativeModel('gemini-1.5-flash')
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+ai_model = genai.GenerativeModel('gemini-1.5-flash')
 
 START_DATE_TIMESTAMP = 1725148800 
 
@@ -1788,7 +1788,7 @@ def get_current_day_number():
 # Резервные фразы на случай, если API отвалится
 FALLBACK_MORNING = "ДОБРОЕ УТРОООО ВСЕМММММММММ! ИИ НЕМНОГО УСТАЛ, НО ЖЕЛАЮ ВСЕМ КРУТОГО ДНЯ И ПУШЕЧНОГО НАСТРОЕНИЯ)))"
 FALLBACK_EVENING = "ВСЕМ КРУТОГО ВЕЧЕРА))) ОТДЫХАЙТЕ И ЧИЛЬТЕ НА ВСЕ СТО!"
-"""
+
 async def generate_vibe_text(time_of_day: str) -> str:
     # Принудительно ищем ключ в обоих возможных вариантах переменных среды
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
@@ -1806,7 +1806,7 @@ async def generate_vibe_text(time_of_day: str) -> str:
     except Exception as e:
         print(f"Ошибка генерации ИИ: {e}")
         return FALLBACK_MORNING if time_of_day == "утро" else FALLBACK_EVENING
-"""
+
 async def send_vibe_embed(target_channel, title_prefix, time_of_day):
     day_num = get_current_day_number()
     
