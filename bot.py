@@ -1807,7 +1807,7 @@ async def generate_vibe_text(time_of_day: str) -> str:
     
     try:
         response = await client.aio.models.generate_content(
-            model='gemini-4-argon',
+            model='gemini-3.8-flash',
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 temperature=1.9, 
