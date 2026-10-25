@@ -1790,6 +1790,8 @@ FALLBACK_EVENING = "ВСЕМ КРУТОГО ВЕЧЕРА))) ОТДЫХАЙТЕ �
 
 import asyncio
 
+import asyncio
+
 async def generate_vibe_text(time_of_day: str) -> str:
     if time_of_day == "утро":
         intent = "СМЫСЛ: Ты должен разбудить чат. Люди должны точно понять, что начался новый день и пора вставать, даже если ты подашь это через дикую шутку."
@@ -1809,17 +1811,17 @@ async def generate_vibe_text(time_of_day: str) -> str:
     )
     
     try:
-        # Температура 1.75 — дает дикий рандом стилей и ролей, но правило "без сюрреализма" удержит её в адеквате
+        # Увеличиваем таймаут до 25 секунд и ставим самую стабильную модель gemini-1.5-flash
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
-                model='gemini-3.8-flash', 
+                model='gemini-1.5-flash', 
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     temperature=1.75, 
                     top_p=0.95,
                 )
             ),
-            timeout=12.0
+            timeout=25.0
         )
         
         text = response.text
@@ -1828,7 +1830,7 @@ async def generate_vibe_text(time_of_day: str) -> str:
             
         return text.strip()
     except asyncio.TimeoutError:
-        return "🚨 БОТ ПРОСПАЛ (Таймаут 12 сек). Попробуй еще раз!"
+        return "🚨 БОТ ПРОСПАЛ (Таймаут 25 сек). Гугл сегодня слишком медленный!"
     except Exception as e:
         return f"🚨 ОШИБКА АПИШКИ: ```{str(e)}```"
         
