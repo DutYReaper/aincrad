@@ -1777,7 +1777,7 @@ async def setup_ranks(interaction: discord.Interaction):
 
 # Настраиваем нейросеть
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-ai_model = genai.GenerativeModel('gemini-1.5-flash')
+ai_model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
 
 START_DATE_TIMESTAMP = 1725148800 
 
