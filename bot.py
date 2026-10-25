@@ -1814,7 +1814,7 @@ async def generate_vibe_text(time_of_day: str) -> str:
         # Увеличиваем таймаут до 25 секунд и ставим самую стабильную модель gemini-1.5-flash
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
-                model='gemini-1.5-flash', 
+                model='gemini-3.5-flash-lite', 
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     temperature=1.75, 
