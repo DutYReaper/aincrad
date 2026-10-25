@@ -3,3 +3,4 @@ Flask
 pymongo
 certifi
 easy-pil
+google-generativeai
