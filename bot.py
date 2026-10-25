@@ -6,17 +6,16 @@ import time
 import asyncio
 import datetime
 import discord
-import os
-from google import genai
-
-# Создаем клиент новой версии API
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 from pymongo import MongoClient
 from discord import app_commands
 from discord.ext import commands, tasks
 from PIL import Image
 from easy_pil import Editor, load_image_async, Font
 from keep_alive import keep_alive
+from google import genai
+
+# Создаем клиент новой версии API
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 # ==========================================
 # 0. ФОРМАТИРОВАНИЕ ТЕКСТА И ЧИСЕЛ
@@ -1778,10 +1777,6 @@ async def setup_ranks(interaction: discord.Interaction):
 # ==========================================
 # АВТОРСКИЕ УТРЕННИЕ И ВЕЧЕРНИЕ ПОЖЕЛАНИЯ (NEURAL VIBE)
 # ==========================================
-
-# Настраиваем нейросеть
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-ai_model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
 
 START_DATE_TIMESTAMP = 1725148800 
 
