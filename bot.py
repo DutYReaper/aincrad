@@ -1849,21 +1849,27 @@ async def before_morning_vibe():
 async def before_evening_vibe():
     await bot.wait_until_ready()
 
-@bot.tree.command(name="test_morning", description="[АДМИН] Тестовый запуск утреннего вайба")
+@bot.tree.command(name="test_morning", description="Тест утреннего сообщения с ИИ")
 async def test_morning(interaction: discord.Interaction):
-    if not is_admin_or_mod(interaction.user):
-        return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
-    await interaction.response.send_message("⚡ Тестируем утреннее сообщение...", ephemeral=True)
-    channel = interaction.guild.get_channel(CHAT_CHANNEL_ID) or interaction.channel
-    await send_morning_vibe(channel)
+    # Сразу даем Дискорду сигнал, что бот думает (убирает ошибку "The application did not respond")
+    await interaction.response.defer()
+    
+    # Генерируем текст через ИИ
+    vibe_text = await generate_vibe_text("утро")
+    
+    # Отправляем готовый результат в чат
+    await interaction.followup.send(vibe_text)
 
-@bot.tree.command(name="test_evening", description="[АДМИН] Тестовый запуск вечернего вайба")
+@bot.tree.command(name="test_evening", description="Тест вечернего сообщения с ИИ")
 async def test_evening(interaction: discord.Interaction):
-    if not is_admin_or_mod(interaction.user):
-        return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
-    await interaction.response.send_message("🌙 Тестируем вечернее сообщение...", ephemeral=True)
-    channel = interaction.guild.get_channel(CHAT_CHANNEL_ID) or interaction.channel
-    await send_evening_vibe(channel)
+    # Сразу даем Дискорду сигнал, что бот думает
+    await interaction.response.defer()
+    
+    # Генерируем текст через ИИ
+    vibe_text = await generate_vibe_text("вечер")
+    
+    # Отправляем готовый результат в чат
+    await interaction.followup.send(vibe_text)
 
 # Запуск
 if __name__ == "__main__":
