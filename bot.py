@@ -1893,13 +1893,13 @@ async def before_evening_vibe():
 
 @bot.tree.command(name="test_morning", description="Тест утреннего сообщения с ИИ и гифкой")
 async def test_morning(interaction: discord.Interaction):
-    # Сразу даем Дискорду сигнал, что бот думает
+    # Сразу даем сигнал Дискорду, что запрос принят в работу
     await interaction.response.defer()
     
-    # Собираем красивый Embed (Текст от ИИ + Гифка Скалы + День)
+    # Генерируем текст и собираем Embed
     embed = await build_vibe_embed("", "утро")
     
-    # Отправляем готовый результат прямо в чат
+    # Отправляем результат через followup
     await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="test_evening", description="Тест вечернего сообщения с ИИ и гифкой")
