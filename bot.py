@@ -1795,8 +1795,9 @@ async def generate_vibe_text(time_of_day: str) -> str:
         "Пиши без приветствий от лица ИИ, выдавай только сам текст сообщения. Максимум 2-3 предложения."
     )
     try:
+        # Используем актуальную легкую версию ИИ из документации
         response = await client.aio.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-3.5-flash-lite',
             contents=prompt
         )
         return response.text.strip()
