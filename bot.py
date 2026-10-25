@@ -1790,11 +1790,6 @@ FALLBACK_MORNING = "ДОБРОЕ УТРОООО ВСЕМММММММММ! ИИ �
 FALLBACK_EVENING = "ВСЕМ КРУТОГО ВЕЧЕРА))) ОТДЫХАЙТЕ И ЧИЛЬТЕ НА ВСЕ СТО!"
 
 async def generate_vibe_text(time_of_day: str) -> str:
-    # Принудительно ищем ключ в обоих возможных вариантах переменных среды
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if api_key:
-        genai.configure(api_key=api_key)
-
     prompt = (
         f"Сгенерируй короткое, супер энергичное пожелание на {time_of_day} для чата геймерского дискорд сервера. "
         "Стиль: хайповый братан, сленг (типа 'чилл', 'база', 'пушка'), используй КАПСЛОК и много скобочек ))). "
@@ -1802,9 +1797,10 @@ async def generate_vibe_text(time_of_day: str) -> str:
     )
     try:
         response = await ai_model.generate_content_async(prompt)
+        print("УСПЕХ: ИИ сгенерировал текст!")
         return response.text.strip()
     except Exception as e:
-        print(f"Ошибка генерации ИИ: {e}")
+        print(f"ОШИБКА ГЕНЕРАЦИИ ИИ: {e}")
         return FALLBACK_MORNING if time_of_day == "утро" else FALLBACK_EVENING
 
 async def send_vibe_embed(target_channel, title_prefix, time_of_day):
