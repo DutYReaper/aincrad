@@ -1790,14 +1790,14 @@ FALLBACK_EVENING = "ВСЕМ КРУТОГО ВЕЧЕРА))) ОТДЫХАЙТЕ �
 
 async def generate_vibe_text(time_of_day: str) -> str:
     prompt = (
-        f"Сгенерируй позитивное пожелание на {time_of_day} для участников дискорд сервера. "
-        "Пиши ПОЛНОСТЬЮ КАПСОМ. Растягивай некоторые буквы от души (например, УТРОООО, ВСЕМММММ). "
+        f"Сгенерируй ОРИГИНАЛЬНОЕ, гигапозитивное пожелание на {time_of_day} для чата геймеров (называй их братья, легенды, тигры, братик, киберспортсмены). "
+        "Пиши ПОЛНОСТЬЮ КАПСОМ. Растягивай некоторые гласные от души (например, УТРОООО, ДЕЛААААЕМ, ЛЕТИИИМ, БРООО). "
         "Обязательно ставь много скобочек ))) в конце предложений. "
-        "Стиль: добрый, уютный, заботливый бро. Используй фразы в духе: 'чики пуки', 'стей хард гайс', 'дупер супер', 'чилить', 'на стиле', 'полный релакс'. "
+        "Стиль: абсурдный, веселый, заботливый бро-качок (как Скала Джонсон). "
+        "ВАЖНО: ПРИДУМЫВАЙ НОВЫЕ СЛЕНГОВЫЕ ФРАЗЫ! НЕ повторяй постоянно одни и те же слова вроде 'чики пуки' или 'стей хард'. Включай фантазию на максимум, выдавай уникальный заряд хайпа! "
         "КАТЕГОРИЧЕСКИ БЕЗ МАТА, без ругательств, без токсичности. Текст должен быть грамотным. Максимум 2 предложения."
     )
     try:
-        # Используем актуальную легкую версию ИИ из документации
         response = await client.aio.models.generate_content(
             model='gemini-3.5-flash-lite',
             contents=prompt
@@ -1806,30 +1806,40 @@ async def generate_vibe_text(time_of_day: str) -> str:
     except Exception as e:
         return f"🚨 ОШИБКА GOOGLE API: ```{str(e)}```"
 
-async def send_vibe_embed(target_channel, title_prefix, time_of_day):
+# Единая функция для сборки красивого Embed-сообщения (и для тестов, и для таймера)
+async def build_vibe_embed(title_prefix: str, time_of_day: str):
     day_num = get_current_day_number()
     
-    # Нейросеть генерирует уникальный текст прямо перед отправкой
+    # Нейросеть генерирует уникальный текст
     text = await generate_vibe_text(time_of_day)
     
+    # Берем гифку Скалы
     skala_gif = random.choice(SKALA_IMAGES)
     if "media1.tenor.com/m/" in skala_gif:
         parts = skala_gif.split("/")
         if len(parts) >= 6:
             skala_gif = f"https://media.tenor.com/{parts[4]}/tenor.gif"
 
+    # Собираем Embed
     embed = discord.Embed(color=0x2B2D31)
-    embed.set_author(name=f"DAY {day_num} {title_prefix}")
+    
+    title = f"DAY {day_num}"
+    if title_prefix:
+        title += f" {title_prefix}"
+        
+    embed.set_author(name=title)
     embed.description = text
     embed.set_image(url=skala_gif)
-
-    await target_channel.send(embed=embed)
+    
+    return embed
 
 async def send_morning_vibe(target_channel):
-    await send_vibe_embed(target_channel, "", "утро")
+    embed = await build_vibe_embed("", "утро")
+    await target_channel.send(embed=embed)
 
 async def send_evening_vibe(target_channel):
-    await send_vibe_embed(target_channel, "(EVENING)", "вечер")
+    embed = await build_vibe_embed("(EVENING)", "вечер")
+    await target_channel.send(embed=embed)
 
 @tasks.loop(time=datetime.time(hour=2, minute=0, tzinfo=datetime.timezone.utc))
 async def daily_morning_vibe():
@@ -1853,31 +1863,24 @@ async def before_morning_vibe():
 async def before_evening_vibe():
     await bot.wait_until_ready()
 
-@bot.tree.command(name="test_morning", description="Тест утреннего сообщения с ИИ")
+@bot.tree.command(name="test_morning", description="Тест утреннего сообщения с ИИ и гифкой")
 async def test_morning(interaction: discord.Interaction):
-    # Сразу даем Дискорду сигнал, что бот думает (убирает ошибку "The application did not respond")
-    await interaction.response.defer()
-    
-    # Генерируем текст через ИИ
-    vibe_text = await generate_vibe_text("утро")
-
-    random_gif = random.choice(SKALA_IMAGES)
-    
-    # Отправляем готовый результат в чат
-    await interaction.followup.send(vibe_text)
-
-@bot.tree.command(name="test_evening", description="Тест вечернего сообщения с ИИ")
-async def test_evening(interaction: discord.Interaction):
     # Сразу даем Дискорду сигнал, что бот думает
     await interaction.response.defer()
     
-    # Генерируем текст через ИИ
-    vibe_text = await generate_vibe_text("вечер")
-
-    random_gif = random.choice(SKALA_IMAGES)
+    # Собираем красивый Embed (Текст от ИИ + Гифка Скалы + День)
+    embed = await build_vibe_embed("", "утро")
     
-    # Отправляем готовый результат в чат
-    await interaction.followup.send(vibe_text)
+    # Отправляем готовый результат прямо в чат
+    await interaction.followup.send(embed=embed)
+
+@bot.tree.command(name="test_evening", description="Тест вечернего сообщения с ИИ и гифкой")
+async def test_evening(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    embed = await build_vibe_embed("(EVENING)", "вечер")
+    
+    await interaction.followup.send(embed=embed)
 
 # Запуск
 if __name__ == "__main__":
