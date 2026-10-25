@@ -6,6 +6,7 @@ import time
 import asyncio
 import datetime
 import discord
+import google.generativeai as genai
 from pymongo import MongoClient
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -1771,31 +1772,43 @@ async def setup_ranks(interaction: discord.Interaction):
     await interaction.response.send_message("✅ Готово.", ephemeral=True)
     
 # ==========================================
-# АВТОРСКИЕ УТРЕННИЕ И ВЕЧЕРНИЕ ПОЖЕЛАНИЯ
+# АВТОРСКИЕ УТРЕННИЕ И ВЕЧЕРНИЕ ПОЖЕЛАНИЯ (NEURAL VIBE)
 # ==========================================
+
+# Настраиваем нейросеть
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+ai_model = genai.GenerativeModel('gemini-1.5-flash')
+
 START_DATE_TIMESTAMP = 1725148800 
 
 def get_current_day_number():
     now = int(time.time())
     return max(1, (now - START_DATE_TIMESTAMP) // 86400 + 1)
 
-MORNING_MASTERPIECES = [
-    ("ДОБРОЕ УТРОООО ВСЕМММММММММММММММММММММММММММММММММММММММ ЖЕЛАЮЮЮЮЮЮ ВСЕМ ХОРОШЕГО ДНЯ И КРУТОГО НАСТРОЕНИЯЯЯЯЯЯ, ЧТОБЫ ВСЁ БЫЛО В ЖИЗНИ ЧИКИ ПУКИ И ДУПЕР СУПЕР КРУТО)))"),
-    ("ХАХАХАХАХАХА ДОБРОЕ УТРО ВСЕМ))) ЖЕЛАЮ НАИЛУЧШЕГО И ПОЗИТИВНОГО ДНЯ, ЧТОБЫ ВЫ УЛЫБАЛИСЬ ПОЧАЩЕ И НАСТРОЕНИЕ БЫЛО ПРОСТО ПУШКА!"),
-    ("ДОБРОЕ УТРО ВСЕМ, ЖЕЛАЮ ХОРОШЕГО, ПОЗИТИВНОГО И САМОГО КРУТОГО ДНЯ И САМЫХ КРУТЫХ ЭМОЦИЙ (ХОРОШИХ))) СТЕЙ ХАРД ГАЙС!"),
-]
+# Резервные фразы на случай, если API отвалится
+FALLBACK_MORNING = "ДОБРОЕ УТРОООО ВСЕМММММММММ! ИИ НЕМНОГО УСТАЛ, НО ЖЕЛАЮ ВСЕМ КРУТОГО ДНЯ И ПУШЕЧНОГО НАСТРОЕНИЯ)))"
+FALLBACK_EVENING = "ВСЕМ КРУТОГО ВЕЧЕРА))) ОТДЫХАЙТЕ И ЧИЛЬТЕ НА ВСЕ СТО!"
 
-EVENING_MASTERPIECES = [
-    ("ВСЕМ КРУТОГО ВЕЧЕРА))) НАДЕЮСЬ ВАШ ДЕНЬ ПРОШЕЛ АФИГЕННО И НА СТИЛЕ, ОТДЫХАЙТЕ, ЗАСЛУЖИЛИ ПОЛНЫЙ РЕЛАКС!"),
-    ("НОЧНОЙ ВАЙБ НА СВЯЗИ))) ВСЕМ САМОГО УЮТНОГО И КРУТОГО ВЕЧЕРА, ЗАКРЫВАЙТЕ ВСЕ СВОИ ДЕЛА И ПОРА ЧИЛИТЬ!"),
-    ("УЖЕ ВЕЧЕРЕТЬ НАЧАЛОСЬ, ЖЕЛАЮ ОТДОХНУТЬ НА ВСЕ СТО))) ЧТОБЫ НОЧЬ ПРОШЛА СПОКОЙНО И СУПЕР ПОЗИТИВНО!"),
-]
+async def generate_vibe_text(time_of_day: str) -> str:
+    prompt = (
+        f"Сгенерируй короткое, супер энергичное пожелание на {time_of_day} для чата геймерского дискорд сервера. "
+        "Стиль: хайповый братан, сленг (типа 'чилл', 'база', 'пушка'), используй КАПСЛОК и много скобочек ))). "
+        "Пиши без приветствий от лица ИИ, выдавай только сам текст сообщения. Максимум 2-3 предложения."
+    )
+    try:
+        response = await ai_model.generate_content_async(prompt)
+        return response.text.strip()
+    except Exception as e:
+        print(f"Ошибка генерации ИИ: {e}")
+        return FALLBACK_MORNING if time_of_day == "утро" else FALLBACK_EVENING
 
-async def send_vibe_embed(target_channel, title_prefix, texts_list):
+async def send_vibe_embed(target_channel, title_prefix, time_of_day):
     day_num = get_current_day_number()
-    text = random.choice(texts_list)
+    
+    # Нейросеть генерирует уникальный текст прямо перед отправкой
+    text = await generate_vibe_text(time_of_day)
+    
     skala_gif = random.choice(SKALA_IMAGES)
-
     if "media1.tenor.com/m/" in skala_gif:
         parts = skala_gif.split("/")
         if len(parts) >= 6:
@@ -1809,10 +1822,10 @@ async def send_vibe_embed(target_channel, title_prefix, texts_list):
     await target_channel.send(embed=embed)
 
 async def send_morning_vibe(target_channel):
-    await send_vibe_embed(target_channel, "", MORNING_MASTERPIECES)
+    await send_vibe_embed(target_channel, "", "утро")
 
 async def send_evening_vibe(target_channel):
-    await send_vibe_embed(target_channel, "(EVENING)", EVENING_MASTERPIECES)
+    await send_vibe_embed(target_channel, "(EVENING)", "вечер")
 
 @tasks.loop(time=datetime.time(hour=2, minute=0, tzinfo=datetime.timezone.utc))
 async def daily_morning_vibe():
