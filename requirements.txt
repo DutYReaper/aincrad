@@ -1,5 +1,5 @@
 discord.py
-Flask
+flask
 pymongo
 certifi
 easy-pil
