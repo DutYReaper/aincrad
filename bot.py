@@ -1847,7 +1847,7 @@ async def generate_vibe_text(time_of_day: str) -> str:
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
-                model='gemini-1.5-flash', 
+                model='gemini-3.5-flash-lite', 
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     temperature=1.85, # Еще чуть-чуть повысили для генерации совсем безумных сочетаний
