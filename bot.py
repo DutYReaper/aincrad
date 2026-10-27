@@ -1013,7 +1013,7 @@ class CustomRoleModal(discord.ui.Modal, title="Кастомная роль"):
         super().__init__()
         self.price = price
         
-        async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction):
         role_n = self.role_name.value.strip()
         if custom_roles_coll.find_one({"role_name": {"$regex": f"^{re.escape(role_n)}$", "$options": "i"}}) or discord.utils.get(interaction.guild.roles, name=role_n):
             return await interaction.response.send_message("❌ Роль существует!", ephemeral=True)
@@ -1047,7 +1047,7 @@ class CustomTitleModal(discord.ui.Modal, title="Кастомный титул"):
         super().__init__()
         self.price = price
         
-        async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction):
         title_t = self.title_text.value.strip()
         if not try_spend(interaction.user.id, self.price):
             return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
@@ -1059,7 +1059,7 @@ class ShopButtonsView(discord.ui.View):
     def __init__(self): 
         super().__init__(timeout=300)
         
-        @discord.ui.button(label="Неприкасаемый (15 000)", style=discord.ButtonStyle.blurple, emoji="🛡️")
+    @discord.ui.button(label="Неприкасаемый (15 000)", style=discord.ButtonStyle.blurple, emoji="🛡️")
     async def buy_untouchable(self, interaction: discord.Interaction, button: discord.ui.Button):
         role = discord.utils.get(interaction.guild.roles, name="Неприкасаемый")
         if not role:
@@ -1093,19 +1093,6 @@ class ShopButtonsView(discord.ui.View):
             
         await interaction.response.send_modal(CustomTitleModal(5000))
 
-@bot.tree.command(name="shop", description="Магазин предметов")
-@check_maintenance()
-async def shop(interaction: discord.Interaction):
-    embed = discord.Embed(title="🛒 ЦЕНТРАЛЬНЫЙ ИГРОВОЙ МАГАЗИН АЙНКРАДА", description="Добро пожаловать в торговый интерфейс системы. Выберите нужную привилегию для покупки с помощью кнопок ниже.", color=0x2B2D31)
-    
-    embed.add_field(name="🛡️ Элитный статус «Неприкасаемый»", value=f"{text_blue('Стоимость: 15 000 Колов')}Обеспечивает абсолютный и бессрочный иммунитет от любых попыток карманных краж и грабежей другими игроками.", inline=False)
-    embed.add_field(name="✨ Персональная Кастомная Роль", value=f"{text_blue('Стоимость: 10 000 Колов')}Позволяет зарегистрировать собственное уникальное имя роли и персональный цвет в формате HEX с выдачей в ваш профиль.", inline=False)
-    embed.add_field(name="👑 Уникальный Кастомный Титул", value=f"{text_blue('Стоимость: 5 000 Колов')}Устанавливает индивидуальный престижный текстовый статус, который отображается в вашем персональном `/profile`.", inline=False)
-    
-    embed.set_image(url="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExMmZrb210em05Ync0M2p6bnE2anJwZGM2NDk2MG9ieDluN3JzbTk2ZCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/DU3DhzJli9dsc/giphy.gif")
-    embed.set_footer(text="Aincrad Economy System • Используйте кнопки интерфейса для взаимодействия")
-    await interaction.response.send_message(embed=embed, view=ShopButtonsView())
-
 class EditRoleModal(discord.ui.Modal, title="Редактирование"):
     role_name = discord.ui.TextInput(label="Новое имя", max_length=50)
     role_color = discord.ui.TextInput(label="HEX", max_length=6, min_length=6)
@@ -1115,7 +1102,7 @@ class EditRoleModal(discord.ui.Modal, title="Редактирование"):
         self.target_role = target_role
         self.price = price
         
-        async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction):
         if self.target_role is None:
             return await interaction.response.send_message("❌ Роль не найдена!", ephemeral=True)
 
