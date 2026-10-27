@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import certifi
 import random
 import time
@@ -14,9 +15,12 @@ from easy_pil import Editor, load_image_async, Font
 from keep_alive import keep_alive
 from google import genai
 
-# Создаем клиент новой версии API
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-
+# Клиент Gemini. Без ключа бот НЕ падает при старте, а использует резервные фразы
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+if client is None:
+    print("⚠️ GEMINI_API_KEY не задан: рассылки будут использовать резервные фразы.")
+    
 # ==========================================
 # 0. ФОРМАТИРОВАНИЕ ТЕКСТА И ЧИСЕЛ
 # ==========================================
@@ -79,7 +83,6 @@ PUBLIC_IDEA_CHANNEL_ID = 1532592402223730739
 ADMIN_IDEA_CHANNEL_ID = 1532719050319466610   
 DOCS_CHANNEL_ID = 1533682208487903483
 CHAT_CHANNEL_ID = 1529469957337780296
-GENERAL_CHAT_ID = 1234567890123456789 
 
 voice_start_times, voice_accumulated = {}, {}
 user_last_message_time, log_cooldowns = {}, {}
@@ -108,6 +111,16 @@ def get_user(user_id: int) -> dict:
 
 def update_coins(user_id: int, amount: int):
     users_coll.update_one({"_id": user_id}, {"$inc": {"coins": amount}})
+
+def try_spend(user_id: int, amount: int) -> bool:
+    """Атомарно списывает Колы, только если баланса хватает. True = списано."""
+    if amount <= 0:
+        return True
+    result = users_coll.update_one(
+        {"_id": user_id, "coins": {"$gte": amount}},
+        {"$inc": {"coins": -amount}}
+    )
+    return result.matched_count == 1
 
 def is_admin_or_mod(member: discord.Member) -> bool:
     if member.guild_permissions.administrator: return True
@@ -530,44 +543,53 @@ class MarryAcceptView(discord.ui.View):
         super().__init__(timeout=300)
         self.proposer = proposer
         self.target = target
+        self.done = False
 
     @discord.ui.button(label="Принять", style=discord.ButtonStyle.green, emoji="💍")
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.target.id: 
+        if interaction.user.id != self.target.id:
             return await interaction.response.send_message("❌ Не для вас!", ephemeral=True)
-        if get_user(self.proposer.id)['coins'] < 3000: 
+        if self.done:
+            return await interaction.response.send_message("❌ Предложение уже обработано!", ephemeral=True)
+        self.done = True  # защита от двойного клика (между проверкой и флагом нет await)
+
+        if get_user(self.proposer.id).get('partner_id') or get_user(self.target.id).get('partner_id'):
+            self.done = False
+            return await interaction.response.send_message("❌ Один из вас уже в браке!", ephemeral=True)
+
+        if not try_spend(self.proposer.id, 3000):
+            self.done = False
             return await interaction.response.send_message("❌ У инициатора нет средств!", ephemeral=True)
-        
+
+        current_time = time.time()
+        users_coll.update_one({"_id": self.proposer.id}, {"$set": {"partner_id": self.target.id, "marry_time": current_time}})
+        users_coll.update_one({"_id": self.target.id}, {"$set": {"partner_id": self.proposer.id, "marry_time": current_time}})
+
         for child in self.children: child.disabled = True
-        
+        embed = discord.Embed(title="💖 УСПЕШНО ПОЖЕНИЛИСЬ!", description=f"{self.target.mention} и {self.proposer.mention} теперь состоят в законном браке!", color=0xFF69B4)
+        embed.set_image(url="https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExcmwwc2U1cDg3ZHUzcjZ6ZG9ieGhlZ2llcGhsNzgzeTE3Y3k0bHFxYyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/nyGFcsP0kAobm/giphy.gif")
+        await interaction.response.edit_message(embed=embed, view=self)  # отвечаем СРАЗУ, роли потом
+
         role = discord.utils.get(interaction.guild.roles, name="💞")
         if role:
-            try: 
+            try:
                 await self.proposer.add_roles(role)
                 await self.target.add_roles(role)
             except Exception: pass
-        
-        update_coins(self.proposer.id, -3000)
-        current_time = time.time()
-        
-        users_coll.update_one({"_id": self.proposer.id}, {"$set": {"partner_id": self.target.id, "marry_time": current_time}})
-        users_coll.update_one({"_id": self.target.id}, {"$set": {"partner_id": self.proposer.id, "marry_time": current_time}})
-        
-        embed = discord.Embed(title="💖 УСПЕШНО ПОЖЕНИЛИСЬ!", description=f"{self.target.mention} и {self.proposer.mention} теперь состоят в законном браке!", color=0xFF69B4)
-        embed.set_image(url="https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExcmwwc2U1cDg3ZHUzcjZ6ZG9ieGhlZ2llcGhsNzgzeTE3Y3k0bHFxYyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/nyGFcsP0kAobm/giphy.gif")
-        await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="Отказать", style=discord.ButtonStyle.red, emoji="💔")
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.target.id: 
+        if interaction.user.id != self.target.id:
             return await interaction.response.send_message("❌ Не для вас!", ephemeral=True)
-            
+        if self.done:
+            return await interaction.response.send_message("❌ Предложение уже обработано!", ephemeral=True)
+        self.done = True
+
         for child in self.children: child.disabled = True
-        
         embed = discord.Embed(title="💔 ОТКАЗ", description=f"{self.target.mention} отверг(ла) предложение.", color=0x2B2D31)
         embed.set_image(url="https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExeXo0aXNtbDVpOHY0NmN5d3NjcnBvdmJrZ2hnYm13dHV3ZnllZ2E3YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/oS56qcrdYDBw4/giphy.gif")
         await interaction.response.edit_message(embed=embed, view=self)
-
+        
 @bot.tree.command(name="marry", description="Сделать предложение руки и сердца (3000 Колов)")
 @check_maintenance()
 async def marry(interaction: discord.Interaction, member: discord.Member):
@@ -586,15 +608,21 @@ async def marry(interaction: discord.Interaction, member: discord.Member):
 @check_maintenance()
 async def divorce(interaction: discord.Interaction):
     user_data = get_user(interaction.user.id)
-    if not user_data.get("partner_id"): 
+    partner_id = user_data.get("partner_id")
+    if not partner_id:
         return await interaction.response.send_message("❌ Вы не в браке!", ephemeral=True)
-    if user_data['coins'] < 1000: 
-        return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
-        
-    partner_id = user_data["partner_id"]
-    users_coll.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -1000}, "$set": {"partner_id": None, "marry_time": 0.0}})
+
+    # Одна атомарная операция: и проверка брака, и баланса, и списание, и разрыв
+    result = users_coll.update_one(
+        {"_id": interaction.user.id, "partner_id": partner_id, "coins": {"$gte": 1000}},
+        {"$inc": {"coins": -1000}, "$set": {"partner_id": None, "marry_time": 0.0}}
+    )
+    if result.matched_count == 0:
+        return await interaction.response.send_message("❌ Недостаточно средств (или брак уже расторгнут)!", ephemeral=True)
+
     users_coll.update_one({"_id": partner_id}, {"$set": {"partner_id": None, "marry_time": 0.0}})
-    
+    await interaction.response.send_message(embed=discord.Embed(title="💔 РАЗВОД", description=f"Вы расторгли брак с <@{partner_id}>.", color=0x2B2D31))
+
     role = discord.utils.get(interaction.guild.roles, name="💞")
     if role:
         try:
@@ -602,8 +630,6 @@ async def divorce(interaction: discord.Interaction):
             partner_member = interaction.guild.get_member(partner_id)
             if partner_member: await partner_member.remove_roles(role)
         except Exception: pass
-        
-    await interaction.response.send_message(embed=discord.Embed(title="💔 РАЗВОД", description=f"Вы расторгли брак с <@{partner_id}>.", color=0x2B2D31))
 
 @bot.tree.command(name="love_profile", description="Профиль вашей пары")
 @check_maintenance()
@@ -653,15 +679,15 @@ async def leaderboard(interaction: discord.Interaction, category: str = "level")
 @bot.tree.command(name="pay", description="Перевод Колов (Комиссия 10%)")
 @check_maintenance()
 async def pay(interaction: discord.Interaction, member: discord.Member, amount: int):
-    if amount <= 0 or member.id == interaction.user.id: 
+    if amount <= 0 or member.id == interaction.user.id:
         return await interaction.response.send_message("❌ Некорректная сумма/цель!", ephemeral=True)
-    if get_user(interaction.user.id)['coins'] < amount: 
+
+    get_user(interaction.user.id)
+    get_user(member.id)
+    if not try_spend(interaction.user.id, amount):
         return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
 
-    get_user(member.id)
     fee = int(amount * 0.10)
-    
-    update_coins(interaction.user.id, -amount)
     update_coins(member.id, amount - fee)
 
     embed = discord.Embed(title="💸 ПЕРЕВОД УСПЕШЕН", description=f"Транзакция для {member.mention} проведена.", color=0x2B2D31)
@@ -771,39 +797,52 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
     if attacker['coins'] < potential_amount: 
         return await interaction.response.send_message(f"❌ Нужен залог в {format_spaces(potential_amount)} Колов!", ephemeral=True)
 
-    users_coll.update_one({"_id": attacker['_id']}, {"$set": {"last_rob": current_time}})
+        users_coll.update_one({"_id": attacker['_id']}, {"$set": {"last_rob": current_time}})
+
+    # Деньги двигаем СРАЗУ и атомарно, анимация потом только показывает итог.
+    # Кулдаун ставится до результата намеренно: от него нельзя уйти спамом или падением.
+    outcome = "fail"
+    if random.choice([True, False]):
+        if try_spend(target['_id'], potential_amount):
+            update_coins(attacker['_id'], potential_amount)
+            outcome = "success"
+        else:
+            outcome = "empty"  # жертва успела потратить деньги
+    else:
+        try_spend(attacker['_id'], potential_amount)
+
     await interaction.response.send_message(embed=discord.Embed(title="🕵️ ОГРАБЛЕНИЕ", description="Вы подкрадываетесь...", color=0x2C3E50))
     await asyncio.sleep(3.0)
 
     result_embed = discord.Embed(title="🕵️ ИТОГ ОГРАБЛЕНИЯ")
-    if random.choice([True, False]):
-        update_coins(attacker['_id'], potential_amount)
-        update_coins(target['_id'], -potential_amount)
+    if outcome == "success":
         await add_xp(interaction, attacker['_id'], 20)
-        
         result_embed.color = 0x2ECC71
         result_embed.add_field(name="✅ Статус", value=text_blue(f"Успех! Украдено: +{format_spaces(potential_amount)} Колов"), inline=False)
         result_embed.set_image(url="https://i.pinimg.com/originals/58/23/81/582381e4e65d4f6a027116695445d649.gif")
+    elif outcome == "empty":
+        result_embed.color = 0x95A5A6
+        result_embed.add_field(name="🤷 Статус", value=text_blue("Жертва успела потратить деньги. Вы ушли ни с чем."), inline=False)
     else:
-        update_coins(attacker['_id'], -potential_amount)
         result_embed.color = 0xE74C3C
         result_embed.add_field(name="🚨 Статус", value=text_red(f"Заметили! Штраф: {format_spaces(potential_amount)} Колов"), inline=False)
         result_embed.set_image(url="https://i.pinimg.com/originals/1d/85/80/1d8580859a663c8c58d2aa9ff9dc87c8.gif")
-        
+
     result_embed.set_footer(text="Aincrad Economy System")
     await interaction.edit_original_response(embed=result_embed)
-
+    
 # ==========================================
 # 5. АЗАРТНЫЕ ИГРЫ И ДУЭЛЬ
 # ==========================================
+
 async def check_gambling(interaction: discord.Interaction, amount: int):
     if amount < 50:
         await interaction.response.send_message("❌ Мин. ставка: 50 Колов!", ephemeral=True)
         return False
-    if get_user(interaction.user.id)['coins'] < amount:
+    get_user(interaction.user.id)
+    if not try_spend(interaction.user.id, amount):
         await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
         return False
-    update_coins(interaction.user.id, -amount)
     return True
 
 class DuelAcceptView(discord.ui.View):
@@ -812,42 +851,50 @@ class DuelAcceptView(discord.ui.View):
         self.challenger = challenger
         self.target = target
         self.amount = amount
+        self.done = False
 
     @discord.ui.button(label="Принять", style=discord.ButtonStyle.green, emoji="⚔️")
     async def accept_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.target.id: 
+        if interaction.user.id != self.target.id:
             return await interaction.response.send_message("❌ Не для вас!", ephemeral=True)
-            
+        if self.done:
+            return await interaction.response.send_message("❌ Вызов уже обработан!", ephemeral=True)
+        self.done = True
+
         for child in self.children: child.disabled = True
         await interaction.response.edit_message(view=self)
-        
-        if get_user(self.challenger.id)['coins'] < self.amount or get_user(self.target.id)['coins'] < self.amount:
-            return await interaction.followup.send("❌ Недостаточно средств у одного из бойцов!", ephemeral=True)
-        
+
+        # Эскроу: списываем обе ставки сразу и атомарно
+        if not try_spend(self.challenger.id, self.amount):
+            return await interaction.followup.send("❌ У вызвавшего недостаточно средств!", ephemeral=True)
+        if not try_spend(self.target.id, self.amount):
+            update_coins(self.challenger.id, self.amount)  # возврат
+            return await interaction.followup.send("❌ У вас недостаточно средств!", ephemeral=True)
+
+        winner = random.choice([self.challenger, self.target])
+        update_coins(winner.id, self.amount * 2)  # выплата до анимации
+
         embed = discord.Embed(title="─────────────── ┌ ⚔️ АРЕНА ┐ ───────────────", description="Бой начинается...", color=0xE67E22)
         embed.add_field(name="Ставка", value=text_blue(f"{format_spaces(self.amount)} Колов"), inline=False)
         embed.set_image(url="https://media.tenor.com/HsNUWd_R6RYAAAAC/sword-art-online-sao.gif")
         msg = await interaction.followup.send(embed=embed)
         await asyncio.sleep(3.0)
-        
-        winner = random.choice([self.challenger, self.target])
-        loser = self.target if winner == self.challenger else self.challenger
-        
-        update_coins(winner.id, self.amount)
-        update_coins(loser.id, -self.amount)
-        await add_xp(interaction, winner.id, 25)
-        
+
         result_embed = discord.Embed(title="─────────────── ┌ ⚔️ ИТОГ БОЯ ┐ ───────────────", color=0x3498DB)
         result_embed.add_field(name="🏆 Победитель", value=winner.mention, inline=False)
         result_embed.add_field(name="💰 Приз", value=text_blue(f"+{format_spaces(self.amount)} Колов"), inline=False)
         result_embed.set_footer(text="Aincrad Battle System")
         await msg.edit(embed=result_embed, attachments=[])
+        await add_xp(winner, winner.id, 25)  # раньше XP/роль уходили тому, кто нажал кнопку, а не победителю
 
     @discord.ui.button(label="Отклонить", style=discord.ButtonStyle.red, emoji="🏃")
     async def decline_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.target.id: 
+        if interaction.user.id != self.target.id:
             return await interaction.response.send_message("❌ Не для вас!", ephemeral=True)
-            
+        if self.done:
+            return await interaction.response.send_message("❌ Вызов уже обработан!", ephemeral=True)
+        self.done = True
+
         for child in self.children: child.disabled = True
         cancel_embed = discord.Embed(title="⚔️ ОТМЕНА", description=f"{self.target.mention} отклонил вызов.", color=0x2B2D31)
         await interaction.response.edit_message(embed=cancel_embed, view=self)
@@ -855,14 +902,14 @@ class DuelAcceptView(discord.ui.View):
 @bot.tree.command(name="duel", description="Вызвать на дуэль")
 @check_maintenance()
 async def duel(interaction: discord.Interaction, target: discord.Member, amount: int):
-    if target.id == interaction.user.id or target.bot: 
+    if target.id == interaction.user.id or target.bot:
         return await interaction.response.send_message("❌ Ошибка цели!", ephemeral=True)
-    if amount < 50: 
+    if amount < 50:
         return await interaction.response.send_message("❌ Мин ставка 50!", ephemeral=True)
-        
+
     if get_user(interaction.user.id)['coins'] < amount or get_user(target.id)['coins'] < amount:
         return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
-    
+
     embed = discord.Embed(title="⚔️ ВЫЗОВ НА АРЕНУ", description=f"{interaction.user.mention} вызывает {target.mention}!", color=0xE67E22)
     embed.add_field(name="Ставка", value=text_blue(f"{format_spaces(amount)} Колов"), inline=False)
     await interaction.response.send_message(content=target.mention, embed=embed, view=DuelAcceptView(interaction.user, target, amount))
@@ -871,29 +918,31 @@ async def duel(interaction: discord.Interaction, target: discord.Member, amount:
 @check_maintenance()
 async def dice(interaction: discord.Interaction, amount: int):
     if not await check_gambling(interaction, amount): return
-    
+
+    player_roll, bot_roll = random.randint(1, 6), random.randint(1, 6)
+    is_win = player_roll > bot_roll
+    if is_win:
+        update_coins(interaction.user.id, amount * 2)
+    elif player_roll == bot_roll:
+        update_coins(interaction.user.id, amount)  # ничья: возврат ставки
+
     embed = discord.Embed(title="🎲 КОСТИ", description="Бросаем...", color=0x9B59B6)
     embed.set_image(url="https://i.pinimg.com/originals/80/9f/ba/809fba531ccbb8e24010696ffa1503e2.gif")
     await interaction.response.send_message(embed=embed)
     await asyncio.sleep(3.0)
 
-    player_roll, bot_roll = random.randint(1, 6), random.randint(1, 6)
-    is_win = player_roll > bot_roll
     color = 0x2ECC71 if is_win else 0xE74C3C if player_roll < bot_roll else 0xF1C40F
-    
     result_embed = discord.Embed(title="─────────────── ┌ 🎲 ИТОГ ┐ ───────────────", color=color)
     result_embed.add_field(name="Вы", value=text_blue(player_roll), inline=True)
     result_embed.add_field(name="Бот", value=text_blue(bot_roll), inline=True)
-    
+
     if is_win:
-        update_coins(interaction.user.id, amount * 2)
         result_embed.add_field(name="💼 Выигрыш", value=text_green(f"+{format_spaces(amount)} Колов"), inline=False)
-    elif player_roll < bot_roll: 
+    elif player_roll < bot_roll:
         result_embed.add_field(name="💼 Проигрыш", value=text_red(f"-{format_spaces(amount)} Колов"), inline=False)
     else:
-        update_coins(interaction.user.id, amount)
         result_embed.description = "🤝 Ничья. Возврат ставки."
-        
+
     result_embed.set_footer(text="Aincrad Casino")
     await interaction.edit_original_response(embed=result_embed, attachments=[])
     await add_xp(interaction, interaction.user.id, random.randint(5, 10))
@@ -903,26 +952,26 @@ async def dice(interaction: discord.Interaction, amount: int):
 @check_maintenance()
 async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
     if not await check_gambling(interaction, amount): return
-    
+
+    result_flip = random.choice(["орел", "решка"])
+    is_win = choice == result_flip
+    if is_win:
+        update_coins(interaction.user.id, amount * 2)
+
     embed = discord.Embed(title="🪙 ОРЕЛ И РЕШКА", description="Бросаем...", color=0xF1C40F)
     embed.set_image(url="https://i.pinimg.com/originals/5d/3b/f5/5d3bf5ea6706bd4dc96cec12418765ea.gif")
     await interaction.response.send_message(embed=embed)
     await asyncio.sleep(3.0)
 
-    result_flip = random.choice(["орел", "решка"])
-    is_win = choice == result_flip
-    
     color = 0x2ECC71 if is_win else 0xE74C3C
     result_embed = discord.Embed(title="🪙 РЕЗУЛЬТАТ МОНЕТКИ", color=color)
-    
     result_embed.add_field(name="🎯 Выпало", value=f"```ansi\n\u001b[0;37m{result_flip.upper()}\u001b[0m\n```", inline=False)
-    
+
     if is_win:
-        update_coins(interaction.user.id, amount * 2)
         result_embed.add_field(name="💰 Статус", value=text_green(f"Победа! +{format_spaces(amount)} Колов"), inline=False)
-    else: 
+    else:
         result_embed.add_field(name="💰 Статус", value=text_red(f"Проигрыш: -{format_spaces(amount)} Колов"), inline=False)
-        
+
     await interaction.edit_original_response(embed=result_embed, attachments=[])
     await add_xp(interaction, interaction.user.id, random.randint(5, 15))
 
@@ -930,24 +979,26 @@ async def coinflip(interaction: discord.Interaction, choice: str, amount: int):
 @check_maintenance()
 async def roulette(interaction: discord.Interaction, amount: int):
     if not await check_gambling(interaction, amount): return
-    
+
+    shot = random.choice([True, False, False, False, False, False])
+    if not shot:
+        update_coins(interaction.user.id, amount * 2)
+
     embed = discord.Embed(title="🎯 РУССКАЯ РУЛЕТКА", description="Вращаем барабан...", color=0xE74C3C)
     embed.set_image(url="https://i.pinimg.com/originals/ac/56/c5/ac56c5c7e6037a698e22c9a30a8dccda.gif")
     await interaction.response.send_message(embed=embed)
     await asyncio.sleep(3.0)
 
-    shot = random.choice([True, False, False, False, False, False])
     color = 0x2ECC71 if not shot else 0xE74C3C
     result_embed = discord.Embed(title="🔫 ИТОГ РУССКОЙ РУЛЕТКИ", color=color)
-    
+
     if not shot:
-        update_coins(interaction.user.id, amount * 2)
         result_embed.add_field(name="💀 Барабан", value=text_green("Пусто (Щелк)"), inline=False)
         result_embed.add_field(name="💰 Статус", value=text_green(f"Победа! +{format_spaces(amount)} Колов"), inline=False)
     else:
         result_embed.add_field(name="💀 Барабан", value=text_red("Смертельный выстрел (БАХ)"), inline=False)
         result_embed.add_field(name="💰 Статус", value=text_red(f"Проигрыш: -{format_spaces(amount)} Колов"), inline=False)
-        
+
     await interaction.edit_original_response(embed=result_embed, attachments=[])
     await add_xp(interaction, interaction.user.id, random.randint(10, 20))
 
@@ -962,25 +1013,32 @@ class CustomRoleModal(discord.ui.Modal, title="Кастомная роль"):
         super().__init__()
         self.price = price
         
-    async def on_submit(self, interaction: discord.Interaction):
+        async def on_submit(self, interaction: discord.Interaction):
         role_n = self.role_name.value.strip()
-        if custom_roles_coll.find_one({"role_name": {"$regex": f"^{role_n}$", "$options": "i"}}) or discord.utils.get(interaction.guild.roles, name=role_n):
+        if custom_roles_coll.find_one({"role_name": {"$regex": f"^{re.escape(role_n)}$", "$options": "i"}}) or discord.utils.get(interaction.guild.roles, name=role_n):
             return await interaction.response.send_message("❌ Роль существует!", ephemeral=True)
-            
-        try: 
+
+        try:
             color_int = int(self.role_color.value.strip(), 16)
-        except Exception: 
+        except Exception:
             return await interaction.response.send_message("❌ Неверный HEX!", ephemeral=True)
-        
-        update_coins(interaction.user.id, -self.price)
-        try: 
+
+        if not try_spend(interaction.user.id, self.price):
+            return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
+
+        await interaction.response.defer(ephemeral=True)
+        new_role = None
+        try:
             new_role = await interaction.guild.create_role(name=role_n, color=discord.Color(color_int))
             await interaction.user.add_roles(new_role)
             custom_roles_coll.insert_one({"role_id": new_role.id, "user_id": interaction.user.id, "role_name": role_n})
-            await interaction.response.send_message(f"✅ Роль **{role_n}** создана!", ephemeral=True)
+            await interaction.followup.send(f"✅ Роль **{role_n}** создана!", ephemeral=True)
         except Exception:
             update_coins(interaction.user.id, self.price)
-            await interaction.response.send_message("❌ Ошибка создания.", ephemeral=True)
+            if new_role:
+                try: await new_role.delete()
+                except Exception: pass
+            await interaction.followup.send("❌ Ошибка создания. Колы возвращены.", ephemeral=True)
 
 class CustomTitleModal(discord.ui.Modal, title="Кастомный титул"):
     title_text = discord.ui.TextInput(label="Текст", max_length=30)
@@ -989,9 +1047,11 @@ class CustomTitleModal(discord.ui.Modal, title="Кастомный титул"):
         super().__init__()
         self.price = price
         
-    async def on_submit(self, interaction: discord.Interaction):
+        async def on_submit(self, interaction: discord.Interaction):
         title_t = self.title_text.value.strip()
-        users_coll.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -self.price}, "$set": {"special_title": title_t}})
+        if not try_spend(interaction.user.id, self.price):
+            return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
+        users_coll.update_one({"_id": interaction.user.id}, {"$set": {"special_title": title_t}})
         titles_coll.insert_one({"user_id": interaction.user.id, "title_name": title_t})
         await interaction.response.send_message(f"👑 Титул **{title_t}** куплен!", ephemeral=True)
 
@@ -999,18 +1059,22 @@ class ShopButtonsView(discord.ui.View):
     def __init__(self): 
         super().__init__(timeout=300)
         
-    @discord.ui.button(label="Неприкасаемый (15 000)", style=discord.ButtonStyle.blurple, emoji="🛡️")
+        @discord.ui.button(label="Неприкасаемый (15 000)", style=discord.ButtonStyle.blurple, emoji="🛡️")
     async def buy_untouchable(self, interaction: discord.Interaction, button: discord.ui.Button):
         role = discord.utils.get(interaction.guild.roles, name="Неприкасаемый")
-        if not role: 
+        if not role:
             return await interaction.response.send_message("❌ Роли нет на сервере.", ephemeral=True)
-        if role in interaction.user.roles: 
+        if role in interaction.user.roles:
             return await interaction.response.send_message("❌ Уже есть!", ephemeral=True)
-        if get_user(interaction.user.id)['coins'] < 15000: 
+        get_user(interaction.user.id)
+        if not try_spend(interaction.user.id, 15000):
             return await interaction.response.send_message("❌ Нет средств!", ephemeral=True)
-            
-        update_coins(interaction.user.id, -15000)
-        await interaction.user.add_roles(role)
+
+        try:
+            await interaction.user.add_roles(role)
+        except Exception:
+            update_coins(interaction.user.id, 15000)
+            return await interaction.response.send_message("❌ Не удалось выдать роль. Колы возвращены.", ephemeral=True)
         await interaction.response.send_message("🎉 Статус куплен!", ephemeral=True)
         
     @discord.ui.button(label="Кастомная роль (10 000)", style=discord.ButtonStyle.green, emoji="✨")
@@ -1051,23 +1115,32 @@ class EditRoleModal(discord.ui.Modal, title="Редактирование"):
         self.target_role = target_role
         self.price = price
         
-    async def on_submit(self, interaction: discord.Interaction):
-        new_name = self.role_name.value
-        if custom_roles_coll.find_one({"role_name": new_name, "role_id": {"$ne": self.target_role.id}}): 
+        async def on_submit(self, interaction: discord.Interaction):
+        if self.target_role is None:
+            return await interaction.response.send_message("❌ Роль не найдена!", ephemeral=True)
+
+        new_name = self.role_name.value.strip()
+        if custom_roles_coll.find_one({"role_name": new_name, "role_id": {"$ne": self.target_role.id}}):
             return await interaction.response.send_message("❌ Имя занято!", ephemeral=True)
-            
-        try: 
-            color_int = int(self.role_color.value, 16)
-        except Exception: 
+
+        try:
+            color_int = int(self.role_color.value.strip(), 16)
+        except Exception:
             return await interaction.response.send_message("❌ Неверный HEX!", ephemeral=True)
-            
-        update_coins(interaction.user.id, -self.price)
-        await self.target_role.edit(name=new_name, color=discord.Color(color_int))
-        
+
+        if not try_spend(interaction.user.id, self.price):
+            return await interaction.response.send_message("❌ Недостаточно средств!", ephemeral=True)
+
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self.target_role.edit(name=new_name, color=discord.Color(color_int))
+        except Exception:
+            update_coins(interaction.user.id, self.price)
+            return await interaction.followup.send("❌ Ошибка редактирования. Колы возвращены.", ephemeral=True)
+
         custom_roles_coll.update_one({"role_id": self.target_role.id}, {"$set": {"role_name": new_name}})
         auction_coll.update_one({"role_id": self.target_role.id}, {"$set": {"role_name": new_name}})
-        
-        await interaction.response.send_message(f"✅ Обновлено на **{new_name}**!", ephemeral=True)
+        await interaction.followup.send(f"✅ Обновлено на **{new_name}**!", ephemeral=True)
 
 class SelectRoleView(discord.ui.View):
     def __init__(self, roles_list, callback_func):
@@ -1094,25 +1167,30 @@ async def editrole(interaction: discord.Interaction):
 @bot.tree.command(name="deleterole", description="Удалить роль (5000)")
 @check_maintenance()
 async def deleterole(interaction: discord.Interaction):
-    if get_user(interaction.user.id)['coins'] < 5000: 
+    if get_user(interaction.user.id)['coins'] < 5000:
         return await interaction.response.send_message("❌ Нет средств!", ephemeral=True)
-        
+
     roles = [interaction.guild.get_role(r["role_id"]) for r in list(custom_roles_coll.find({"user_id": interaction.user.id})) if interaction.guild.get_role(r["role_id"])]
-    if not roles: 
+    if not roles:
         return await interaction.response.send_message("❌ Нет ролей!", ephemeral=True)
 
     async def delete_callback(inter: discord.Interaction):
         role_id = int(inter.data['values'][0])
-        role_to_del = inter.guild.get_role(role_id)
-        
-        update_coins(inter.user.id, -5000)
-        custom_roles_coll.delete_one({"role_id": role_id})
+
+        if not try_spend(inter.user.id, 5000):
+            return await inter.response.send_message("❌ Нет средств!", ephemeral=True)
+
+        deleted = custom_roles_coll.delete_one({"role_id": role_id, "user_id": inter.user.id})
+        if deleted.deleted_count == 0:
+            update_coins(inter.user.id, 5000)
+            return await inter.response.send_message("❌ Роль не найдена или уже удалена.", ephemeral=True)
+
         auction_coll.delete_one({"role_id": role_id})
-        
-        if role_to_del: 
+        role_to_del = inter.guild.get_role(role_id)
+        if role_to_del:
             try: await role_to_del.delete()
             except Exception: pass
-            
+
         await inter.response.send_message("🗑️ Роль удалена!", ephemeral=True)
 
     await interaction.response.send_message(embed=discord.Embed(title="🗑️ УДАЛЕНИЕ", color=0xE74C3C), view=SelectRoleView(roles, delete_callback), ephemeral=True)
@@ -1587,14 +1665,39 @@ async def resetuser(interaction: discord.Interaction, member: discord.Member):
     get_user(member.id)
     await interaction.response.send_message(f"☢️ Профиль {member.mention} сброшен!", ephemeral=True)
 
-@bot.tree.command(name="resetdb", description="[АДМИН] Полный сброс БД")
-async def resetdb(interaction: discord.Interaction):
-    if not is_admin_or_mod(interaction.user): 
-        return await interaction.response.send_message("❌ Нет прав!", ephemeral=True)
-    for collection in [users_coll, guilds_coll, custom_roles_coll, titles_coll, auction_coll, guild_reqs_coll]: 
-        collection.delete_many({})
-    await interaction.response.send_message("☢️ БД полностью очищена!", ephemeral=True)
+class ResetDbConfirmView(discord.ui.View):
+    def __init__(self, author_id: int):
+        super().__init__(timeout=30)
+        self.author_id = author_id
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id or not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Это не ваша кнопка!", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="ДА, ОЧИСТИТЬ ВСЁ", style=discord.ButtonStyle.danger, emoji="☢️")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        for collection in [users_coll, guilds_coll, custom_roles_coll, titles_coll, auction_coll, guild_reqs_coll]:
+            collection.delete_many({})
+        self.stop()
+        await interaction.edit_original_response(content="☢️ БД полностью очищена!", view=None)
+
+    @discord.ui.button(label="Отмена", style=discord.ButtonStyle.grey, emoji="✖️")
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="✅ Очистка отменена.", view=None)
+
+@bot.tree.command(name="resetdb", description="[АДМИН] Полный сброс БД")
+@app_commands.guild_only()
+async def resetdb(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Только администраторы сервера!", ephemeral=True)
+    await interaction.response.send_message(
+        "⚠️ **ВНИМАНИЕ:** будет удалена ВСЯ база (профили, гильдии, роли, титулы, аукцион). Это необратимо.\nУ вас 30 секунд.",
+        view=ResetDbConfirmView(interaction.user.id), ephemeral=True
+    )
 # ==========================================
 # 10. НОВОСТИ, СТРИМЫ, ИДЕИ, ВЕРИФИКАЦИЯ И СИСТЕМА СООБЩЕНИЙ
 # ==========================================
@@ -1788,19 +1891,9 @@ def get_current_day_number():
 FALLBACK_MORNING = "ДОБРОЕ УТРОООО ВСЕМММММММММ! ИИ НЕМНОГО УСТАЛ, НО ЖЕЛАЮ ВСЕМ КРУТОГО ДНЯ И ПУШЕЧНОГО НАСТРОЕНИЯ)))"
 FALLBACK_EVENING = "ВСЕМ КРУТОГО ВЕЧЕРА))) ОТДЫХАЙТЕ И ЧИЛЬТЕ НА ВСЕ СТО!"
 
-import asyncio
-
-import asyncio
-
-import asyncio
-import random
-
-import asyncio
-
-import asyncio
-import random
-
 async def generate_vibe_text(time_of_day: str) -> str:
+    if client is None:
+        return FALLBACK_MORNING if time_of_day == "утро" else FALLBACK_EVENING
     # Python сам выбирает 1-2 сленговых слова, чтобы нейросеть не пихала всё подряд в один текст
     all_slang = [
         'пушка', 'чилить', 'стей хард гайс', 'чики пуки', 
