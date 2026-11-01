@@ -6,8 +6,10 @@ import random
 import time
 import asyncio
 import datetime
+import traceback
 import discord
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 from discord import app_commands
 from discord.ext import commands, tasks
 from PIL import Image
@@ -20,7 +22,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 if client is None:
     print("⚠️ GEMINI_API_KEY не задан: рассылки будут использовать резервные фразы.")
-    
+
 # ==========================================
 # 0. ФОРМАТИРОВАНИЕ ТЕКСТА И ЧИСЕЛ
 # ==========================================
@@ -46,8 +48,26 @@ format_spaces = format_number
 # 1. НАСТРОЙКИ И БАЗА ДАННЫХ
 # ==========================================
 MONGO_URI = os.getenv('MONGO_URI')
-cluster = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+if not MONGO_URI:
+    print("❌ MONGO_URI не задан в переменных окружения!")
+
+# Короткие таймауты: если база недоступна, бот быстро получает ошибку, а не висит по 30 секунд
+cluster = MongoClient(
+    MONGO_URI,
+    tlsCAFile=certifi.where(),
+    serverSelectionTimeoutMS=5000,
+    connectTimeoutMS=5000,
+    socketTimeoutMS=15000,
+)
 db = cluster.aincrad_data
+
+# Проверка подключения при старте: бот НЕ падает, но причина сразу видна в логах Render
+try:
+    cluster.admin.command("ping")
+    print("✅ MongoDB: подключение и авторизация успешны.")
+except Exception as e:
+    print(f"❌ MongoDB: не удалось подключиться/авторизоваться: {e}")
+    print("   Проверьте MONGO_URI на Render: логин, пароль (спецсимволы кодируются, например @ -> %40) и Network Access (0.0.0.0/0) в Atlas.")
 
 users_coll = db.users
 custom_roles_coll = db.custom_roles
@@ -179,6 +199,32 @@ async def add_xp(interaction_or_member, user_id: int, amount: int):
                 except Exception: pass
 
 # ==========================================
+# ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК СЛЭШ-КОМАНД
+# ==========================================
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    # check_maintenance уже сам ответил пользователю
+    if isinstance(error, app_commands.CheckFailure):
+        return
+
+    original = getattr(error, "original", error)
+    if isinstance(original, PyMongoError):
+        print(f"❌ Ошибка БД в команде /{getattr(interaction.command, 'name', '?')}: {original}")
+        text = "🛠️ База данных временно недоступна. Попробуйте через минуту."
+    else:
+        print(f"❌ Ошибка в команде /{getattr(interaction.command, 'name', '?')}:")
+        traceback.print_exception(type(error), error, error.__traceback__)
+        text = "❌ Произошла внутренняя ошибка. Попробуйте ещё раз."
+
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(text, ephemeral=True)
+        else:
+            await interaction.response.send_message(text, ephemeral=True)
+    except Exception:
+        pass  # взаимодействие уже истекло, отвечать некуда
+
+# ==========================================
 # ИНТЕРАКТИВНАЯ СИСТЕМА ВЕРИФИКАЦИИ
 # ==========================================
 class VerificationGenderSelect(discord.ui.View):
@@ -264,13 +310,22 @@ class VerifySystemView(discord.ui.View):
 # ==========================================
 # 3. ИВЕНТЫ (АВТОМОД, ВОЙС, ПРИВЕТСТВИЕ)
 # ==========================================
+bot_ready_once = False
+
 @bot.event
 async def on_ready():
-    bot.add_view(VerifySystemView())
-    await bot.tree.sync()
+    global bot_ready_once
+    # on_ready может вызываться повторно при переподключении к Discord:
+    # повторный .start() у задач вызывал бы RuntimeError, а sync() каждый раз лишний
+    if not bot_ready_once:
+        bot_ready_once = True
+        bot.add_view(VerifySystemView())
+        await bot.tree.sync()
 
-    daily_morning_vibe.start()
-    daily_evening_vibe.start()
+    if not daily_morning_vibe.is_running():
+        daily_morning_vibe.start()
+    if not daily_evening_vibe.is_running():
+        daily_evening_vibe.start()
         
     print(f"Бот {bot.user} запущен и полностью готов к работе в Айнкраде!")
 
@@ -358,8 +413,8 @@ class MediaModerationView(discord.ui.View):
             webhooks = await channel.webhooks()
             webhook = discord.utils.get(webhooks, name="Yui Media") or await channel.create_webhook(name="Yui Media")
             
-            # 🔥 МАГИЯ ЗДЕСЬ: Бот берет вложения прямо из сообщения, под которым ты нажал кнопку!
-            # Ему больше не нужно держать их в памяти часами.
+            # Бот берет вложения прямо из сообщения, под которым нажата кнопка,
+            # поэтому ему не нужно держать их в памяти часами.
             files = [await attachment.to_file() for attachment in interaction.message.attachments]
             
             content = f"**Отправил:** <@{self.author_id}>\n\n{self.content_text}" if self.content_text else f"**Отправил:** <@{self.author_id}>"
@@ -475,7 +530,11 @@ async def on_message(message):
                 print(f"Ошибка премодерации: {e}")
             return
 
-    await add_xp(message, message.author.id, random.randint(2, 5))
+    try:
+        await add_xp(message, message.author.id, random.randint(2, 5))
+    except PyMongoError as e:
+        # Недоступная база не должна ломать обработку сообщений и команд
+        print(f"❌ Ошибка БД при начислении XP: {e}")
     await bot.process_commands(message)
 
 # ==========================================
@@ -589,7 +648,7 @@ class MarryAcceptView(discord.ui.View):
         embed = discord.Embed(title="💔 ОТКАЗ", description=f"{self.target.mention} отверг(ла) предложение.", color=0x2B2D31)
         embed.set_image(url="https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExeXo0aXNtbDVpOHY0NmN5d3NjcnBvdmJrZ2hnYm13dHV3ZnllZ2E3YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/oS56qcrdYDBw4/giphy.gif")
         await interaction.response.edit_message(embed=embed, view=self)
-        
+
 @bot.tree.command(name="marry", description="Сделать предложение руки и сердца (3000 Колов)")
 @check_maintenance()
 async def marry(interaction: discord.Interaction, member: discord.Member):
@@ -797,7 +856,7 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
     if attacker['coins'] < potential_amount: 
         return await interaction.response.send_message(f"❌ Нужен залог в {format_spaces(potential_amount)} Колов!", ephemeral=True)
 
-        users_coll.update_one({"_id": attacker['_id']}, {"$set": {"last_rob": current_time}})
+    users_coll.update_one({"_id": attacker['_id']}, {"$set": {"last_rob": current_time}})
 
     # Деньги двигаем СРАЗУ и атомарно, анимация потом только показывает итог.
     # Кулдаун ставится до результата намеренно: от него нельзя уйти спамом или падением.
@@ -827,14 +886,13 @@ async def rob(interaction: discord.Interaction, member: discord.Member):
         result_embed.color = 0xE74C3C
         result_embed.add_field(name="🚨 Статус", value=text_red(f"Заметили! Штраф: {format_spaces(potential_amount)} Колов"), inline=False)
         result_embed.set_image(url="https://i.pinimg.com/originals/1d/85/80/1d8580859a663c8c58d2aa9ff9dc87c8.gif")
-
+        
     result_embed.set_footer(text="Aincrad Economy System")
     await interaction.edit_original_response(embed=result_embed)
-    
+
 # ==========================================
 # 5. АЗАРТНЫЕ ИГРЫ И ДУЭЛЬ
 # ==========================================
-
 async def check_gambling(interaction: discord.Interaction, amount: int):
     if amount < 50:
         await interaction.response.send_message("❌ Мин. ставка: 50 Колов!", ephemeral=True)
@@ -1093,6 +1151,19 @@ class ShopButtonsView(discord.ui.View):
             
         await interaction.response.send_modal(CustomTitleModal(5000))
 
+@bot.tree.command(name="shop", description="Магазин предметов")
+@check_maintenance()
+async def shop(interaction: discord.Interaction):
+    embed = discord.Embed(title="🛒 ЦЕНТРАЛЬНЫЙ ИГРОВОЙ МАГАЗИН АЙНКРАДА", description="Добро пожаловать в торговый интерфейс системы. Выберите нужную привилегию для покупки с помощью кнопок ниже.", color=0x2B2D31)
+    
+    embed.add_field(name="🛡️ Элитный статус «Неприкасаемый»", value=f"{text_blue('Стоимость: 15 000 Колов')}Обеспечивает абсолютный и бессрочный иммунитет от любых попыток карманных краж и грабежей другими игроками.", inline=False)
+    embed.add_field(name="✨ Персональная Кастомная Роль", value=f"{text_blue('Стоимость: 10 000 Колов')}Позволяет зарегистрировать собственное уникальное имя роли и персональный цвет в формате HEX с выдачей в ваш профиль.", inline=False)
+    embed.add_field(name="👑 Уникальный Кастомный Титул", value=f"{text_blue('Стоимость: 5 000 Колов')}Устанавливает индивидуальный престижный текстовый статус, который отображается в вашем персональном `/profile`.", inline=False)
+    
+    embed.set_image(url="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExMmZrb210em05Ync0M2p6bnE2anJwZGM2NDk2MG9ieDluN3JzbTk2ZCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/DU3DhzJli9dsc/giphy.gif")
+    embed.set_footer(text="Aincrad Economy System • Используйте кнопки интерфейса для взаимодействия")
+    await interaction.response.send_message(embed=embed, view=ShopButtonsView())
+
 class EditRoleModal(discord.ui.Modal, title="Редактирование"):
     role_name = discord.ui.TextInput(label="Новое имя", max_length=50)
     role_color = discord.ui.TextInput(label="HEX", max_length=6, min_length=6)
@@ -1218,7 +1289,7 @@ class GuildModal(discord.ui.Modal):
         if self.mode == "create":
             if get_user(interaction.user.id)['coins'] < 25000: 
                 return await interaction.response.send_message("❌ Нужно 25k!", ephemeral=True)
-            if guilds_coll.find_one({"guild_name": {"$regex": f"^{value}$", "$options": "i"}}): 
+            if guilds_coll.find_one({"guild_name": {"$regex": f"^{re.escape(value)}$", "$options": "i"}}): 
                 return await interaction.response.send_message("❌ Имя занято!", ephemeral=True)
                 
             users_coll.update_one({"_id": interaction.user.id}, {"$inc": {"coins": -25000}, "$set": {"guild_id": value}})
@@ -1685,6 +1756,7 @@ async def resetdb(interaction: discord.Interaction):
         "⚠️ **ВНИМАНИЕ:** будет удалена ВСЯ база (профили, гильдии, роли, титулы, аукцион). Это необратимо.\nУ вас 30 секунд.",
         view=ResetDbConfirmView(interaction.user.id), ephemeral=True
     )
+
 # ==========================================
 # 10. НОВОСТИ, СТРИМЫ, ИДЕИ, ВЕРИФИКАЦИЯ И СИСТЕМА СООБЩЕНИЙ
 # ==========================================
@@ -1881,6 +1953,7 @@ FALLBACK_EVENING = "ВСЕМ КРУТОГО ВЕЧЕРА))) ОТДЫХАЙТЕ �
 async def generate_vibe_text(time_of_day: str) -> str:
     if client is None:
         return FALLBACK_MORNING if time_of_day == "утро" else FALLBACK_EVENING
+
     # Python сам выбирает 1-2 сленговых слова, чтобы нейросеть не пихала всё подряд в один текст
     all_slang = [
         'пушка', 'чилить', 'стей хард гайс', 'чики пуки', 
