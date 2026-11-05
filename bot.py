@@ -1951,8 +1951,9 @@ FALLBACK_MORNING = "ДОБРОЕ УТРОООО ВСЕМММММММММ! ИИ �
 FALLBACK_EVENING = "ВСЕМ КРУТОГО ВЕЧЕРА))) ОТДЫХАЙТЕ И ЧИЛЬТЕ НА ВСЕ СТО!"
 
 async def generate_vibe_text(time_of_day: str) -> str:
+    fallback = FALLBACK_MORNING if time_of_day == "утро" else FALLBACK_EVENING
     if client is None:
-        return FALLBACK_MORNING if time_of_day == "утро" else FALLBACK_EVENING
+        return fallback
 
     # Python сам выбирает 1-2 сленговых слова, чтобы нейросеть не пихала всё подряд в один текст
     all_slang = [
@@ -1984,30 +1985,39 @@ async def generate_vibe_text(time_of_day: str) -> str:
         "5. НЕ НАДО искусственно растягивать каждую букву в словах (максимум одно слово на весь текст, например 'УТРООО').\n\n"
         "Выдай ТОЛЬКО текст, без кавычек и описаний."
     )
-    
-    try:
-        response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model='gemini-3.5-flash-lite', 
-                contents=prompt,
-                config=genai.types.GenerateContentConfig(
-                    temperature=1.4, 
-                    top_p=0.95,
-                )
-            ),
-            timeout=25.0
-        )
-        
-        text = response.text
-        if text is None:
-            return "ДОБРОЕ УТРО БРАТВА))) ЖЕЛАЮ ВСЕМ АФИГЕННОГО ДНЯ!" if time_of_day == "утро" else "ВСЕМ КРУТОГО ВЕЧЕРА))) ИДИТЕ ЧИЛИТЬ!"
-            
-        return text.strip()
-    except asyncio.TimeoutError:
-        return "🚨 БРАТВА, ТАЙМАУТ))) НО МЫ НЕ СДАЕМСЯ!"
-    except Exception as e:
-        return f"🚨 ОШИБКА МАТРИЦЫ: ```{str(e)}```"
-        
+
+    # Временные сбои Google (перегрузка, лимиты) переживаем повторными попытками
+    transient_markers = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "INTERNAL", "504", "DEADLINE")
+    delays = [0, 3, 8]
+
+    for attempt, delay in enumerate(delays, start=1):
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            response = await asyncio.wait_for(
+                client.aio.models.generate_content(
+                    model='gemini-3.5-flash-lite', 
+                    contents=prompt,
+                    config=genai.types.GenerateContentConfig(
+                        temperature=1.4, 
+                        top_p=0.95,
+                    )
+                ),
+                timeout=25.0
+            )
+            text = (response.text or "").strip()
+            if text:
+                return text
+            print(f"⚠️ Gemini: пустой ответ (попытка {attempt}/{len(delays)})")
+        except asyncio.TimeoutError:
+            print(f"⚠️ Gemini: таймаут (попытка {attempt}/{len(delays)})")
+        except Exception as e:
+            print(f"⚠️ Gemini: ошибка (попытка {attempt}/{len(delays)}): {e}")
+            if not any(marker in str(e) for marker in transient_markers):
+                break  # ошибка не временная (например, неверный ключ), повторять бессмысленно
+
+    # Все попытки провалились: в чат уходит нормальная фраза, а не текст ошибки
+    return fallbackA
 # Единая функция для сборки красивого Embed-сообщения (и для тестов, и для таймера)
 async def build_vibe_embed(title_prefix: str, time_of_day: str):
     day_num = get_current_day_number()
